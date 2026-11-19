@@ -36,6 +36,27 @@ They're optional until a module needs them. Put them in `.env.local` (never comm
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Module 5: evals, tracing and monitoring | [Langfuse Cloud](https://cloud.langfuse.com) > new project > Create API keys (free)         |
 | `LANGFUSE_BASE_URL`                          | Module 5: your Langfuse region          | The `LANGFUSE_BASE_URL` Langfuse shows next to your keys, e.g. `https://cloud.langfuse.com` |
 
+## Tests and CI
+
+Run the same checks as CI on your machine (Node 24):
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs these five steps, in this
+order, on Ubuntu with Node 24 for every pull request into `main` and every
+push to `main`. If any step fails, the `check` job fails. `npm test` needs no
+keys; the one live-AI test (`tests/ai.integration.test.ts`) is skipped when no
+Google key is set, so CI does not exercise it.
+
+**Merge rules for `main`:** changes go in only through a pull request, and the
+`check` job must pass before the merge button works. No direct pushes to `main`.
+
 ## Commands
 
 | Command                              | What it does                                          |
