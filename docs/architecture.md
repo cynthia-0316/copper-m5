@@ -171,3 +171,56 @@ the tests and a golden-set evaluation with an AI judge run in GitHub Actions
 on every pull request, with `main` protected; every AI call is traced in
 Langfuse; and one support agent that does everything is compared with the two
 agents on the same golden set. Langfuse is the only eval and monitoring tool.
+
+## Module 5: Langfuse tracing
+
+**Summary:** every Ask Copper turn is traced in [Langfuse](https://langfuse.com):
+which agent answered, each model call with its tokens, cost and time, each tool
+call with what went in and came out, and the handoffs between Copper and the
+Refund agent. Tracing only watches: it never changes an answer or runs a tool.
+
+**Shape in Langfuse**
+
+| Langfuse | In the app |
+|---|---|
+| Session | One chat in the panel (tools on and tools off are two chats). `components/copper/ask-copper.tsx` makes a random id per chat and sends it as `sessionId`; `askCopper` replaces a malformed one |
+| Trace (`ask-copper-turn`) | One turn: the question in, the reply out |
+| Agent observation | `Copper` or `Refund agent`: one per agent that answers in the turn |
+| Generation | One model step of an agent: model, tokens the model reported, estimated cost, time to first token, total time |
+| Tool observation | One tool call: input, output, or the error. Handoff tools (`transfer_to_refund_agent`, `transfer_to_copper`) show here too |
+| Event `handoff: A → B` | The moment one agent passes the chat to the other, under the agent that handed off |
+
+**Where the code is**
+
+- `lib/ai/langfuse.ts`: reads `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
+  `LANGFUSE_BASE_URL` (server only), gives Langfuse its own tracer provider,
+  and `flushTraces()` sends everything when a turn ends. With a variable
+  missing, tracing is off: one warning in the terminal naming the missing
+  variables, and the app runs as before.
+- `lib/copper/assistant/trace.ts`: `startTurn()` turns the AI SDK stream parts
+  (`start-step`, `tool-call`, `tool-result`, `finish-step`, `error`, ...) into
+  the observations above. Every method catches its own errors.
+- `lib/copper/assistant/ask.ts`: starts the turn, feeds each stream part to the
+  tracer as it reads the stream, ends and flushes the trace after the panel has
+  its reply, and uses Next's `after()` so a serverless host keeps the request
+  alive until the trace is sent.
+- `lib/ai/call.ts` is unchanged: `[ai_calls]` lines are logged as before. The
+  trace counts each model step once (the agent and trace rows carry no tokens of
+  their own), so Langfuse's totals match the sum of the steps.
+
+**Tokens and cost.** Tokens are exactly what Gemini reported. Cost is an
+*estimate*: those tokens times the list prices in `lib/ai/pricing.ts`; the
+generation's metadata says so. If the model reports no tokens, no cost is
+recorded (unknown, not zero).
+
+**What is sent.** The customer's question and Copper's reply, tool inputs and
+outputs (orders, prices, refund decisions), and model names. No API keys, no
+environment values, no system prompts. Text longer than 4,000 characters is cut.
+
+**Failures.** If Langfuse can't be reached, the terminal says the trace may be
+incomplete and the chat is unaffected. A trace is closed with an `ERROR` level
+if the turn fails.
+
+**Known limits.** Spans are sent when the turn ends, so a server killed
+mid-turn loses that turn's trace. Tool timing is measured from the moment the
+tool call is seen in the stream.

@@ -263,6 +263,10 @@ describe("Part A: the Ask Copper chat widget", () => {
     fireEvent.click(chat.getByRole("button", { name: STARTERS[0] }));
     await waitFor(() => expect(askCopper).toHaveBeenCalledTimes(2));
     expect(askCopper.mock.calls[1][0].messages).toHaveLength(3);
+    // Module 5: the same chat keeps one Langfuse session id.
+    expect(askCopper.mock.calls[1][0].sessionId).toBe(
+      askCopper.mock.calls[0][0].sessionId,
+    );
     expect(askCopper.mock.calls[1][0].messages.at(-1)).toEqual({
       role: "user",
       content: STARTERS[0],
@@ -312,6 +316,7 @@ describe("Part A: the Ask Copper chat widget", () => {
         },
       ],
       useTools: true,
+      sessionId: expect.stringMatching(/^[A-Za-z0-9_-]{8,100}$/),
     });
 
     // A follow-up in the same conversation carries the earlier turns.
@@ -336,7 +341,12 @@ describe("Part A: the Ask Copper chat widget", () => {
         },
       ],
       useTools: false,
+      sessionId: expect.stringMatching(/^[A-Za-z0-9_-]{8,100}$/),
     });
+    // The tools-off chat is a different conversation, so a different session.
+    expect(askCopper.mock.calls[2][0].sessionId).not.toBe(
+      askCopper.mock.calls[0][0].sessionId,
+    );
 
     // Switching back shows the tools-on conversation again.
     await waitFor(() =>
