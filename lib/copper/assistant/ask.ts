@@ -10,8 +10,10 @@
 // agent with its own instructions and tools, and the Refund agent can hand it
 // back. The agent that ends the turn answers the next message too.
 import { hasToolCall, stepCountIs } from "ai";
+import { after } from "next/server";
 import { callStream, THOUGHT_SUMMARIES } from "@/lib/ai/call";
 import { createLive, type Live } from "@/lib/ai/live";
+import { defaultModel, type ModelId } from "@/lib/ai/models";
 import {
   COPPER_HANDOFF,
   COPPER_INSTRUCTIONS,
@@ -27,6 +29,7 @@ import {
   refundAgentTools,
   transferToRefundAgent,
 } from "@/lib/copper/assistant/tools";
+import { startTurn, type TurnTracer } from "@/lib/copper/assistant/trace";
 import type { Desk } from "@/lib/copper/orders";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -38,6 +41,8 @@ export type AskCopperRequest = {
   desk?: Desk;
   /** Who answers first: whoever ended the last turn. Copper by default. */
   agent?: Agent;
+  /** The chat this turn belongs to; Langfuse groups a chat's turns by it. */
+  sessionId?: string;
 };
 
 export type AskCopperResult = { progress: Live<Progress> };
@@ -59,13 +64,20 @@ const STOP = [
   hasToolCall("transfer_to_refund_agent", "transfer_to_copper"),
 ];
 
+const SESSION_ID = /^[A-Za-z0-9_-]{8,100}$/;
+
 const SORRY = "Sorry, something went wrong on my end. Please try again.";
 
 /** One agent's call: its instructions and only its own tools. */
-function agentCall(agent: Agent, messages: ChatMessage[], desk?: Desk) {
+function agentCall(
+  agent: Agent,
+  messages: ChatMessage[],
+  model: ModelId,
+  desk?: Desk,
+) {
   if (agent === "refund" && desk)
     return callStream(
-      { module: 4, feature: "refund-agent" },
+      { module: 4, feature: "refund-agent", model },
       {
         messages,
         providerOptions: THOUGHT_SUMMARIES,
@@ -75,7 +87,7 @@ function agentCall(agent: Agent, messages: ChatMessage[], desk?: Desk) {
       },
     );
   return callStream(
-    { module: 2, feature: "ask-copper" },
+    { module: 2, feature: "ask-copper", model },
     {
       messages,
       providerOptions: THOUGHT_SUMMARIES,
@@ -95,9 +107,28 @@ export async function askCopper({
   useTools,
   desk,
   agent = "copper",
+  sessionId,
 }: AskCopperRequest): Promise<AskCopperResult> {
   const { live, update, done } = createLive<Progress>();
   const first: Agent = desk && useTools ? agent : "copper";
+  const model = defaultModel();
+  // One Langfuse trace per turn; its session is the chat. The id comes from
+  // the browser, so a bad one is replaced instead of trusted.
+  const tracer: TurnTracer = startTurn({
+    sessionId:
+      sessionId && SESSION_ID.test(sessionId) ? sessionId : crypto.randomUUID(),
+    question: messages.at(-1)?.content ?? "",
+    useTools,
+    firstAgent: first,
+  });
+  // Langfuse gets the trace after the reply, and the host keeps the request
+  // alive until it is sent.
+  const traceSent = Promise.withResolvers<void>();
+  try {
+    after(() => traceSent.promise);
+  } catch {
+    // Not inside a request (tests, scripts): nothing to keep alive.
+  }
   const progress: Progress = {
     steps: [],
     reply: "",
@@ -125,6 +156,7 @@ export async function askCopper({
   ): Promise<Agent | undefined> {
     let handoff: Agent | undefined;
     for await (const part of result.fullStream) {
+      tracer.part(part);
       switch (part.type) {
         case "reasoning-delta": {
           const last = progress.steps.at(-1);
@@ -191,26 +223,34 @@ export async function askCopper({
   }
 
   // Read the stream in the background, so the panel gets the first update now.
+  let failure: unknown;
   void (async () => {
     try {
       if (!useTools) {
+        tracer.startAgent("copper", model);
         // Without tools, send no instructions either: "always use your
         // tools" with no tools makes the model answer with nothing.
         await follow(
           "copper",
           callStream(
-            { module: 2, feature: "ask-copper" },
+            { module: 2, feature: "ask-copper", model },
             { messages, providerOptions: THOUGHT_SUMMARIES },
           ),
         );
+        tracer.endAgent(progress.reply);
       } else {
         let current = first;
         for (let handoffs = 0; ; handoffs++) {
+          tracer.startAgent(current, model);
           const next = await follow(
             current,
-            agentCall(current, messages, desk),
+            agentCall(current, messages, model, desk),
           );
-          if (!next || next === current || handoffs >= MAX_HANDOFFS) break;
+          const handingOff =
+            next && next !== current && handoffs < MAX_HANDOFFS;
+          if (handingOff) tracer.handoff(current, next);
+          tracer.endAgent(progress.reply);
+          if (!handingOff) break;
           progress.steps.push({ type: "handoff", from: current, to: next });
           progress.agent = current = next;
           progress.reply = "";
@@ -220,11 +260,19 @@ export async function askCopper({
       }
       progress.status = "done";
       if (!progress.reply.trim()) progress.reply = SORRY;
-    } catch {
+    } catch (error) {
       progress.status = "error";
       if (!progress.reply.trim()) progress.reply = SORRY;
+      failure = error;
     }
     done(snapshot());
+    // After the panel has its answer: close the trace and send it.
+    await tracer.finish({
+      status: progress.status === "done" ? "done" : "error",
+      reply: progress.reply,
+      error: failure,
+    });
+    traceSent.resolve();
   })();
 
   return { progress: live };

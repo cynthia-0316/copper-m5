@@ -36,6 +36,42 @@ They're optional until a module needs them. Put them in `.env.local` (never comm
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Module 5: evals, tracing and monitoring | [Langfuse Cloud](https://cloud.langfuse.com) > new project > Create API keys (free)         |
 | `LANGFUSE_BASE_URL`                          | Module 5: your Langfuse region          | The `LANGFUSE_BASE_URL` Langfuse shows next to your keys, e.g. `https://cloud.langfuse.com` |
 
+## Tracing with Langfuse
+
+Every Ask Copper turn is traced in [Langfuse](https://cloud.langfuse.com) so you
+can see which agent answered, each model call (tokens, estimated cost, time),
+each tool call, and the handoffs between Copper and the Refund agent. The app
+runs without it: if any Langfuse variable is missing, the terminal says
+`[langfuse] tracing is off` once and nothing else changes.
+
+**Set it up (once)**
+
+1. In Langfuse Cloud, create an organization and a project (the free plan is enough).
+2. In the project, open Settings > API Keys > Create new API key.
+3. Note which region your project is in. Use the matching `LANGFUSE_BASE_URL`:
+   `https://cloud.langfuse.com` (EU), `https://us.cloud.langfuse.com` (US) or
+   `https://jp.cloud.langfuse.com` (Japan). Langfuse shows the right one next to your keys.
+4. Put `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_BASE_URL` in
+   `.env.local` (never commit it) and in your Vercel project settings. They are
+   read on the server only. Add `GOOGLE_GENERATIVE_AI_API_KEY` too: the chat needs it.
+5. Run `npm run env:check`: it lists the names of the variables that are set,
+   with values masked.
+
+**See it working**
+
+1. `npm run dev`, open http://localhost:3000/support.
+2. Ask a plain question ("What does Copper Home cost?"), one that needs a tool
+   ("Is Copper Notes in stock?"), and a refund ("Refund order #1004"), which
+   hands the chat to the Refund agent.
+3. In Langfuse open Tracing (one trace per question, named `ask-copper-turn`)
+   and Sessions (one session per chat). A trace shows the agent, its model
+   calls with tokens, cost and latency, the tool calls, and a `handoff` event.
+
+The trace tree and what is (and isn't) sent are described in
+[docs/architecture.md](docs/architecture.md#module-5-langfuse-tracing). Cost is
+an estimate from list prices (`lib/ai/pricing.ts`); tokens are what the model
+reported. `npm test` checks the tracing with a mock model and needs no keys.
+
 ## Tests and CI
 
 Run the same checks as CI on your machine (Node 24):
