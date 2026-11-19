@@ -162,6 +162,23 @@ describe("Langfuse tracing", () => {
     expect(new Set(spans.map((s) => s.spanContext().traceId)).size).toBe(1);
   });
 
+  it("counts the wait for the model as the model call's time", async () => {
+    model = new MockLanguageModelV4({
+      doStream: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return { stream: convertArrayToReadableStream(says("Slow answer.")) };
+      },
+    });
+    const { spans } = await traced({
+      messages: [{ role: "user", content: "hi" }],
+      useTools: false,
+      sessionId: "chat-session-0007",
+    });
+    const [call] = ofType(spans, "generation");
+    const [start, nanos] = call.duration;
+    expect(start * 1000 + nanos / 1e6).toBeGreaterThanOrEqual(50);
+  });
+
   it("records a tool call with its input and output under the agent", async () => {
     model = modelStreaming(calls("get_prices", {}), says("It comes to $307."));
     const { spans } = await traced({

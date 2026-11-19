@@ -161,6 +161,10 @@ export function startTurn(info: TurnInfo): TurnTracer {
   let steps = 0;
   let stepText = "";
   let firstToken = false;
+  // When the next model call was sent: the agent starting, or its last tool
+  // returning. A step's stream only starts when the first chunk arrives, so
+  // this keeps the wait for the model inside the step's time.
+  let readyAt = new Date();
   const tools = new Map<string, LangfuseTool>();
   let handoffs = 0;
   let finished = false;
@@ -194,6 +198,7 @@ export function startTurn(info: TurnInfo): TurnTracer {
     startAgent(next, nextModel) {
       safe(warned, () => {
         agentName = next;
+        readyAt = new Date();
         model = nextModel;
         steps = 0;
         agent = turn.startObservation(
@@ -216,13 +221,17 @@ export function startTurn(info: TurnInfo): TurnTracer {
             steps++;
             stepText = "";
             firstToken = false;
-            step = agent.startObservation(
+            step = startObservation(
               `${AGENT_NAMES[agentName]} model call ${steps}`,
               {
                 model: model ? googleId(model) : undefined,
                 metadata: { agent: agentName, step: steps },
               },
-              { asType: "generation" },
+              {
+                asType: "generation",
+                parentSpanContext: agent.otelSpan.spanContext(),
+                startTime: readyAt,
+              },
             );
             tag(step);
             return;
@@ -255,6 +264,7 @@ export function startTurn(info: TurnInfo): TurnTracer {
             const p = part as { toolCallId: string; output: unknown };
             tools.get(p.toolCallId)?.update({ output: p.output }).end();
             tools.delete(p.toolCallId);
+            if (tools.size === 0) readyAt = new Date();
             return;
           }
           case "tool-error": {
@@ -264,6 +274,7 @@ export function startTurn(info: TurnInfo): TurnTracer {
               ?.update({ level: "ERROR", statusMessage: message(p.error) })
               .end();
             tools.delete(p.toolCallId);
+            if (tools.size === 0) readyAt = new Date();
             return;
           }
           case "finish-step": {
