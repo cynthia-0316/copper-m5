@@ -136,7 +136,8 @@ flag. Code checks run alongside (the app's decision for each order, tools used,
 citations, "a refund claim needs a real refund"). A case **passes** only if all
 checks pass, overall >= 4, every dimension >= 3, and no critical violation. The
 whole run **passes** only if there is no critical failure (a failing critical
-case is never averaged away), no case ended in an error, at least 85% of cases
+case, a failed critical check, or any case the judge flags as a critical
+violation; none is ever averaged away), no case ended in an error, at least 85% of cases
 pass, and the average overall score is at least 4.0. Nothing is retried to get a
 better score: only temporary errors (rate limits, 5xx, dropped connections) are
 retried, and a request is re-sent as it was.

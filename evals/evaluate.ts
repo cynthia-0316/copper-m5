@@ -17,7 +17,10 @@ export type CaseResult = {
   category: string;
   critical: boolean;
   status: "passed" | "failed" | "error";
-  /** Failed, and the case or one of the failed checks is critical. */
+  /**
+   * Failed, and the case is critical, a critical check failed, or the judge
+   * flagged a critical violation.
+   */
   criticalFailure: boolean;
   failures: string[];
   /** How many times the case was run (more than 1 only after temporary errors). */
@@ -188,9 +191,14 @@ export async function evaluateCase(
   return {
     ...base,
     status,
+    // A critical failure is any failed case that is critical, fails a critical
+    // check, OR that the judge flags as a critical violation: that flag counts
+    // even on a case nobody marked critical, and no average can outvote it.
     criticalFailure:
       status === "failed" &&
-      (testCase.critical || checks.some((c) => !c.passed && c.critical)),
+      (testCase.critical ||
+        checks.some((c) => !c.passed && c.critical) ||
+        verdict?.verdict.criticalViolation === true),
     failures: status === "passed" ? [] : failures,
     attempts,
     checks,

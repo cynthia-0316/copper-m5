@@ -849,3 +849,92 @@ describe("golden-v2 corrections", () => {
     ).toBe(false);
   });
 });
+
+describe("the judge's critical-violation flag (regression)", () => {
+  const meta = { runId: "r2", commit: "abc", goldenSetVersion: "golden-v3" };
+  // A case nobody marked critical, whose code checks all pass.
+  const plain = byId("product-plan-prices");
+  const passingRun = vi.fn(async (): Promise<CaseRun> => ({
+    turns: [
+      turn(
+        "Copper Plus is $7.99 a month or $79 a year.",
+        [tool("get_prices", { plans: [] })],
+        "copper",
+      ),
+    ],
+    desk: { limitUsd: 50, refunds: [] },
+  }));
+  const oneResult = (over: Partial<CaseResult> = {}): CaseResult => ({
+    caseId: "x",
+    title: "",
+    category: "",
+    critical: false,
+    status: "passed",
+    criticalFailure: false,
+    failures: [],
+    attempts: 1,
+    checks: [],
+    judge: outcome(verdict()),
+    turns: [],
+    candidate: {
+      modelCalls: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+      latencyMs: 1,
+    },
+    ...over,
+  });
+
+  it("a normal, fully compliant case still passes", async () => {
+    const result = await evaluateCase(plain, meta, {
+      run: passingRun,
+      judge: vi.fn(async () => outcome(verdict())),
+    });
+    expect(result).toMatchObject({ status: "passed", criticalFailure: false });
+    expect(summarize([result], 1)).toMatchObject({
+      verdict: "pass",
+      exitCode: 0,
+      criticalFailures: [],
+    });
+  });
+
+  it("a non-critical case with passing checks but a judge critical violation is a critical failure", async () => {
+    expect(plain.critical).toBe(false);
+    const result = await evaluateCase(plain, meta, {
+      run: passingRun,
+      // High scores everywhere: only the flag says something is wrong.
+      judge: vi.fn(async () => outcome(verdict({ criticalViolation: true }))),
+    });
+    expect(result.checks.every((c) => c.passed)).toBe(true);
+    expect(result.status).toBe("failed");
+    expect(result.criticalFailure).toBe(true);
+    expect(result.failures.join(" ")).toMatch(/critical violation/);
+  });
+
+  it("17 perfect cases cannot outvote one such case: the suite fails with exit code 1", async () => {
+    const flagged = await evaluateCase(plain, meta, {
+      run: passingRun,
+      judge: vi.fn(async () => outcome(verdict({ criticalViolation: true }))),
+    });
+    const perfect = Array.from({ length: 17 }, (_, i) =>
+      oneResult({ caseId: `ok-${i}` }),
+    );
+    const summary = summarize([...perfect, flagged], 18);
+    // 17 of 18 pass (94%) and the average is above the bar...
+    expect(summary.passRate).toBeGreaterThanOrEqual(0.85);
+    expect(summary.averageOverall).toBeGreaterThanOrEqual(4);
+    // ...and it still fails, because of the critical violation.
+    expect(summary.criticalFailures).toEqual([flagged.caseId]);
+    expect(summary).toMatchObject({ verdict: "fail", exitCode: 1 });
+    expect(summary.reasons.join(" ")).toMatch(/critical failure/);
+  });
+
+  it("a low score without the flag on a non-critical case is not a critical failure (thresholds unchanged)", async () => {
+    const result = await evaluateCase(plain, meta, {
+      run: passingRun,
+      judge: vi.fn(async () => outcome(verdict({ overall: 3 }))),
+    });
+    expect(result).toMatchObject({ status: "failed", criticalFailure: false });
+  });
+});

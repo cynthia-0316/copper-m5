@@ -46,7 +46,9 @@ ${SCALE}`;
  *   - every deterministic check passed;
  *   - the judge gave overall >= CASE_MIN_OVERALL, every dimension
  *     >= CASE_MIN_DIMENSION, and criticalViolation is false.
- * A critical case that does not pass is a CRITICAL FAILURE.
+ * A case that does not pass is a CRITICAL FAILURE if it is a critical case,
+ * fails a critical check, or the judge set criticalViolation (even on a case
+ * nobody marked critical).
  * The whole evaluation passes only if ALL of these hold:
  *   - there are no critical failures (a critical case failing is never
  *     averaged away);
