@@ -59,6 +59,11 @@ export type TurnInfo = {
   question: string;
   useTools: boolean;
   firstAgent: Agent;
+  /** Langfuse tags and metadata for the trace (the evaluation sets these). */
+  tags?: string[];
+  metadata?: Record<string, string>;
+  /** Langfuse environment, e.g. "eval", to keep test traces apart. */
+  environment?: string;
 };
 
 export type TurnTracer = {
@@ -77,7 +82,7 @@ export type TurnTracer = {
     status: "done" | "error";
     reply: string;
     error?: unknown;
-  }): Promise<void>;
+  }): Promise<boolean>;
 };
 
 const TRACE_NAME = "ask-copper-turn";
@@ -104,7 +109,9 @@ const NOOP: TurnTracer = {
   part() {},
   endAgent() {},
   handoff() {},
-  async finish() {},
+  async finish() {
+    return false;
+  },
 };
 
 /** Runs tracing code; a failure is reported once and never rethrown. */
@@ -147,6 +154,21 @@ export function startTurn(info: TurnInfo): TurnTracer {
       TRACE_NAME,
     );
     tag(turn);
+    if (info.tags?.length)
+      turn.otelSpan.setAttribute(
+        LangfuseOtelSpanAttributes.TRACE_TAGS,
+        info.tags,
+      );
+    for (const [key, value] of Object.entries(info.metadata ?? {}))
+      turn.otelSpan.setAttribute(
+        `${LangfuseOtelSpanAttributes.TRACE_METADATA}.${key}`,
+        value,
+      );
+    if (info.environment)
+      turn.otelSpan.setAttribute(
+        LangfuseOtelSpanAttributes.ENVIRONMENT,
+        info.environment,
+      );
   } catch (error) {
     safe(warned, () => {
       throw error;
@@ -351,7 +373,7 @@ export function startTurn(info: TurnInfo): TurnTracer {
     },
 
     async finish({ status, reply, error }) {
-      if (finished) return;
+      if (finished) return false;
       finished = true;
       safe(warned, () => {
         const reason = error === undefined ? undefined : message(error);
@@ -379,7 +401,7 @@ export function startTurn(info: TurnInfo): TurnTracer {
         turn.end();
       });
       // Nothing waits for Langfuse inside the chat: this runs after the reply.
-      await flushTraces();
+      return flushTraces();
     },
   };
 }

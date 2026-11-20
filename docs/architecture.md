@@ -224,3 +224,62 @@ if the turn fails.
 **Known limits.** Spans are sent when the turn ends, so a server killed
 mid-turn loses that turn's trace. Tool timing is measured from the moment the
 tool call is seen in the stream.
+
+## Module 5: Golden-set evaluation and AI judge
+
+**Summary:** a fixed golden set of questions is run through the real Ask Copper,
+each answer is checked by code and graded by an AI judge (Gemini), the scores
+go to Langfuse, and a GitHub Actions job (`eval`) blocks merges to `main` when
+the evaluation fails. It adds no pages, tables or user-facing AI calls; it adds
+one AI call, the judge (`module: 5`, `feature: "eval-judge"`), logged in
+`[ai_calls]` like every other.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Shared Ask Copper logic | `lib/copper/assistant/run.ts` | `startAskCopper()`: everything the chat does (agents, tools, handoffs, tracing). Also returns the Langfuse trace id, the tokens and cost of the turn, and a promise that resolves once the trace is sent |
+| Server action | `lib/copper/assistant/ask.ts` | A thin wrapper over `startAskCopper()` for the chat panel, so the evaluation tests the same code customers use |
+| Console state | `lib/copper/orders.ts` | `withDecision()` and `supervisorDecision()`: how the Refund Console updates its refunds. The console and the evaluation both call them |
+| Golden set | `evals/golden-set.ts` | 18 cases: conversation, setup (agent, limit, refunds), expected facts, behaviors and forbidden things, sources, and code checks. Version `golden-v2` |
+| Rubric and thresholds | `evals/rubric.ts` | The judge's instructions, the 1-5 scale and the pass rules. Version `rubric-v1` |
+| Code checks | `evals/checks.ts` | Tools used, the app's refund decision, handoffs, citations, the console's final state, "a refund claim needs a real refund" |
+| Runner | `evals/runner.ts` | One fresh conversation per case through `startAskCopper()`; multi-turn cases carry the history, agent and desk the way the UI does |
+| AI judge | `evals/judge.ts` | `callObject()` with a zod schema; the conversation, tool results and standard go in as JSON strings, so nothing in them can act as an instruction |
+| Calibration | `evals/calibration.ts` | Hand-written good, wrong, lying and prompt-injecting answers the judge must grade correctly before a run counts |
+| Decision | `evals/evaluate.ts` | Runs, checks and judges a case; case and whole-run pass rules; exit codes |
+| Langfuse | `evals/langfuse.ts`, `scripts/run-evals.ts` | Dataset `copper-golden-set` (one item per case) and one Langfuse experiment (dataset run) per evaluation through `experiment.run`; each case's scores on its trace; a separate `eval-judge` trace per judging call; read-back verification |
+| Rate limit | `evals/throttle.ts` | At most 12 Google requests a minute (free tier: 15); waits out a 429 and re-sends the same request |
+| Command | `scripts/run-evals.ts` | `npm run eval`, `npm run eval:calibrate` |
+| CI | `.github/workflows/eval.yml` | Job `eval`, required for `main` with `check` |
+
+**Flow of one case.** `runCase` builds a fresh desk (limit and refunds from the
+case), then for each turn calls `startAskCopper` with the messages so far, the
+desk and the current agent. When the turn is over and its trace has been
+sent, it records Copper's reply, the agent that answered, and any refund the
+app decided (`withDecision`). A supervisor turn is applied with
+`supervisorDecision` and sent as the `[Refund Console]` note, like the console
+does. The checks and the judge then see the actual replies, tool inputs and
+outputs, and handoffs. Only a temporary error (rate limit, 5xx, dropped
+connection) runs a case again, from scratch; a low score is the result.
+
+**Where scores go.** Langfuse 4 records an evaluation as an *experiment* on a
+dataset. `scripts/run-evals.ts` registers Langfuse's tracer provider as the
+global one (the app doesn't), syncs the dataset, and runs each case with
+`experiment.run`. Each case becomes one trace: `experiment-item-run`, with
+Ask Copper's turn inside it (`ask-copper-turn`, then its agents, model calls,
+tools and handoffs from Part 2). The case's scores are attached to that same
+trace, never to the judge's own call, which is a separate `eval-judge` trace
+with its own tokens, cost and time. Every trace carries the run id, case id,
+commit, golden-set and rubric versions. The run is complete only when the
+traces and scores were sent (`flush`) *and*, in CI, read back from Langfuse
+(`/api/public/v3/scores` and `/api/public/experiment-items`), because a final
+answer does not mean tracing finished.
+
+**Decisions**
+
+- Code checks sit next to the judge, and critical failures (a refund the app
+  didn't make, internal documents, the wrong refund decision) fail the run
+  whatever the average says.
+- The evaluation never changes the app's data or the Product Bible. Its sources
+  are named per case; the Bible's wrong facts are deliberately not used.
+- The judge uses the same Gemini model as Copper by default. That is cheap and
+  works on a free key, but shares blind spots; `EVAL_JUDGE_MODEL` separates them.

@@ -109,6 +109,18 @@ export async function flushTraces(): Promise<boolean> {
   }
 }
 
+/**
+ * Makes Langfuse's provider the global OpenTelemetry provider (and sets up
+ * async context), for the evaluation's process only: Langfuse's experiment
+ * runner looks for a global provider, and nests each case's spans in the
+ * experiment item's trace through the active context. The app doesn't do this.
+ */
+export function registerTracingGlobally(): boolean {
+  if (!ensureTracing() || !setup) return false;
+  setup.provider.register();
+  return true;
+}
+
 /** For tests: record spans with these processors instead of sending them. */
 export function setSpanProcessorsForTests(processors: SpanProcessor[]) {
   setup = install(processors);
