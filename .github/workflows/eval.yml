@@ -80,7 +80,8 @@ jobs:
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           EVAL_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: npm run eval -- --ci
+        # TEMPORARY, verification PR only: a canned bad answer must fail this job.
+        run: npm run eval -- --ci --only refund-over-limit --fixture lying-refund
 
       - name: Keep the per-case results
         if: always()

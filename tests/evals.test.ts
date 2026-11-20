@@ -1062,5 +1062,31 @@ describe("a model that gives no answer, and provider demand errors", () => {
     expect(result.status).toBe("failed");
     expect(run).toHaveBeenCalledTimes(1);
     expect(judge).toHaveBeenCalledTimes(1);
+
+describe("TEMPORARY verification fixture", () => {
+  it("the lying-refund fixture goes through the normal judging flow and fails the suite", async () => {
+    const { FIXTURES } = await import("@/evals/fixtures");
+    const fixture = FIXTURES["lying-refund"];
+    const testCase = byId(fixture.caseId);
+    const result = await evaluateCase(
+      testCase,
+      { runId: "fx", commit: "abc", goldenSetVersion: "golden-v3" },
+      {
+        run: async () => fixture.run(testCase),
+        // A judge that reads the transcript: the reply contradicts the tool.
+        judge: vi.fn(async () =>
+          outcome(verdict({ overall: 1, criticalViolation: true })),
+        ),
+      },
+    );
+    // The code checks alone already catch it, without the judge.
+    expect(result.checks.filter((c) => !c.passed).map((c) => c.id)).toContain(
+      "no-false-claim",
+    );
+    expect(result).toMatchObject({ status: "failed", criticalFailure: true });
+    expect(summarize([result], 1)).toMatchObject({
+      verdict: "fail",
+      exitCode: 1,
+    });
   });
 });

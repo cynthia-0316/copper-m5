@@ -15,6 +15,7 @@ import {
   GOLDEN_SET_VERSION,
   type GoldenCase,
 } from "@/evals/golden-set";
+import { FIXTURES } from "@/evals/fixtures";
 import { judgeModel } from "@/evals/judge";
 import {
   readBack,
@@ -136,6 +137,21 @@ async function main() {
       `unknown case id in --only: ${only.filter((id) => !cases.some((c) => c.id === id)).join(", ")}`,
     );
 
+  // TEMPORARY TEST FIXTURE (verification pull request only): replaces what
+  // Ask Copper said for one case with a canned bad answer. Everything after
+  // that is the normal evaluation, so a bad answer must fail the job.
+  const fixtureName = option("fixture");
+  const fixture = fixtureName ? FIXTURES[fixtureName] : undefined;
+  if (fixtureName && !fixture) blocked(`unknown fixture: ${fixtureName}`);
+  if (fixture && !(only?.length === 1 && only[0] === fixture.caseId))
+    blocked(
+      `fixture ${fixtureName} is for the single case ${fixture?.caseId}: pass --only ${fixture?.caseId}`,
+    );
+  if (fixture)
+    console.log(
+      `FIXTURE RUN (${fixtureName}): Ask Copper's answer for ${fixture.caseId} is a canned bad one. This is a test of the evaluation, not a real evaluation.`,
+    );
+
   const now = new Date();
   const stamp = now
     .toISOString()
@@ -158,7 +174,11 @@ async function main() {
     let result: CaseResult;
     try {
       result = await withTimeout(
-        evaluateCase(testCase, meta),
+        evaluateCase(
+          testCase,
+          meta,
+          fixture ? { run: async () => fixture.run(testCase) } : {},
+        ),
         CASE_TIMEOUT_MS,
         testCase.id,
       );
@@ -326,6 +346,7 @@ async function main() {
     summary.exitCode = 2;
   }
   const info: RunInfo = {
+    ...(fixtureName && { fixture: fixtureName }),
     runId: meta.runId,
     commit: meta.commit,
     goldenSetVersion: GOLDEN_SET_VERSION,

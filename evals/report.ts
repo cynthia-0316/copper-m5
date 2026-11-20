@@ -9,6 +9,8 @@ export type RunInfo = {
   rubricVersion: string;
   candidateModel: string;
   judgeModel: string;
+  /** Set only on a verification pull request: a canned bad answer was used. */
+  fixture?: string;
   startedAt: string;
   finishedAt: string;
   langfuse: {
@@ -49,6 +51,12 @@ export function markdownSummary(
   const lines: string[] = [
     `## Golden-set evaluation: ${icon}`,
     "",
+    ...(info.fixture
+      ? [
+          `> **FIXTURE RUN (${info.fixture}).** Ask Copper's answer was replaced by a canned bad one to prove a bad answer fails this check. This is not a real evaluation.`,
+          "",
+        ]
+      : []),
     `- Cases: **${summary.total}** | passed **${summary.passed}** | failed **${summary.failed}** | errors **${summary.errors}**`,
     `- Pass rate **${(summary.passRate * 100).toFixed(0)}%**; average judge score **${summary.averageOverall?.toFixed(2) ?? "n/a"}** / 5`,
     `- Run \`${info.runId}\` on commit \`${info.commit.slice(0, 7)}\`; golden set \`${info.goldenSetVersion}\`, rubric \`${info.rubricVersion}\``,
