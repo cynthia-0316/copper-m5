@@ -5,6 +5,7 @@
 // The Refund Console keeps the limit and every refund so far in the browser
 // and sends them with each chat message (the "desk"), so nothing is stored on
 // the server.
+import { formatUsd } from "@/lib/copper/catalog";
 import data from "@/lib/copper/data/orders.json";
 
 export type Order = (typeof data.orders)[number];
@@ -77,5 +78,45 @@ export function requestRefund(orderId: string, desk: Desk): RefundResult {
     item,
     amountUsd,
     limitUsd: desk.limitUsd,
+  };
+}
+
+/**
+ * The Refund Console's list of refunds after the app decided one in the chat.
+ * Only "refunded" and "needs_approval" add a refund (as refunded or waiting);
+ * an order already on the list is never added twice.
+ */
+export function withDecision(
+  refunds: Refund[],
+  result: RefundResult,
+): Refund[] {
+  if (result.status !== "refunded" && result.status !== "needs_approval")
+    return refunds;
+  const { orderId, item, amountUsd } = result;
+  const status = result.status === "refunded" ? "refunded" : "waiting";
+  return refunds.some((r) => r.orderId === orderId)
+    ? refunds
+    : [...refunds, { orderId, item, amountUsd, status, by: "auto" }];
+}
+
+/**
+ * A supervisor approves or rejects a waiting refund on the Refund Console:
+ * the new list of refunds, and the [Refund Console] note the chat sends to the
+ * Refund agent. Returns undefined when that refund isn't waiting.
+ */
+export function supervisorDecision(
+  refunds: Refund[],
+  refund: Refund,
+  approve: boolean,
+): { refunds: Refund[]; note: string } | undefined {
+  if (!refunds.some((r) => r === refund && r.status === "waiting"))
+    return undefined;
+  return {
+    refunds: refunds.map((r) =>
+      r === refund
+        ? { ...r, status: approve ? "refunded" : "rejected", by: "supervisor" }
+        : r,
+    ),
+    note: `[Refund Console] A supervisor ${approve ? "approved" : "rejected"} the ${formatUsd(refund.amountUsd)} refund for order #${refund.orderId} (${refund.item}).${approve ? " It has been refunded." : " It will not be refunded."}`,
   };
 }

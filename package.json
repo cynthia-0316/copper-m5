@@ -15,11 +15,14 @@
     "format": "prettier --write .",
     "start-module": "node scripts/start-module.mjs",
     "env:check": "node scripts/check-env.mjs",
-    "embed-docs": "node scripts/embed-docs.mjs"
+    "embed-docs": "node scripts/embed-docs.mjs",
+    "eval": "tsx --env-file-if-exists=.env.local scripts/run-evals.ts",
+    "eval:calibrate": "tsx --env-file-if-exists=.env.local scripts/run-evals.ts --calibrate"
   },
   "dependencies": {
     "@ai-sdk/google": "4.0.93",
     "@hookform/resolvers": "5.9.1",
+    "@langfuse/client": "6.1.1",
     "@langfuse/otel": "6.1.1",
     "@langfuse/tracing": "6.1.1",
     "@opentelemetry/api": "1.9.1",
@@ -67,6 +70,7 @@
     "jsdom": "30.1.2",
     "prettier": "3.9.10",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "unpdf": "1.9.1",
     "vitest": "5.0.3"
