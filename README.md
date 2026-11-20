@@ -114,7 +114,7 @@ variables to also send the results to Langfuse. Results land in
 Exit code: 0 passed, 1 below the bar, 2 could not finish (missing key, errors,
 Langfuse not reached).
 
-**The golden set** (`evals/golden-set.ts`, version `golden-v2`): products,
+**The golden set** (`evals/golden-set.ts`, version `golden-v3`): products,
 prices and stock; documents and citations; the refund rule below, at and above
 the limit; unknown and already-refunded orders; handoffs both ways; a request
 for a refund without an order; the superseded 18-month privacy policy; a

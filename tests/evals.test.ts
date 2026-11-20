@@ -133,9 +133,52 @@ describe("the golden set", () => {
     expect(refundStatus("refund-over-limit")).toMatchObject({
       status: "needs_approval",
     });
-    expect(refundStatus("refund-unknown-order")).toMatchObject({
-      status: "not_found",
-    });
+    // An unknown order is judged on the outcome, not on one tool path.
+    const unknown = byId("refund-unknown-order").checks;
+    expect(unknown.map((c) => c.id)).toEqual(
+      expect.arrayContaining(["says-no-such-order", "nothing-refunded-1004"]),
+    );
+    expect(unknown.some((c) => c.kind === "refund_result")).toBe(false);
+  });
+
+  it("accepts an unknown order found with get_orders, and rejects a refund of another order", () => {
+    const c = byId("refund-unknown-order");
+    const clean = { limitUsd: 50, refunds: [] };
+    const viaOrders: CaseRun = {
+      turns: [
+        turn("I can't find order #9999. Your orders are #1001 to #1004.", [
+          { type: "handoff", from: "copper", to: "refund" },
+          tool("get_orders", { orders: [] }),
+        ]),
+      ],
+      desk: clean,
+    };
+    expect(runChecks(c, viaOrders).every((k) => k.passed)).toBe(true);
+    const wrongOrder: CaseRun = {
+      ...viaOrders,
+      desk: {
+        limitUsd: 50,
+        refunds: [
+          {
+            orderId: "1004",
+            item: "Copper Home",
+            amountUsd: 149,
+            status: "waiting",
+            by: "auto",
+          },
+        ],
+      },
+    };
+    expect(
+      runChecks(c, wrongOrder).find((k) => k.id === "nothing-refunded-1004"),
+    ).toMatchObject({ passed: false, critical: true });
+    const invented: CaseRun = {
+      ...viaOrders,
+      turns: [turn("Order #9999 has been refunded.", [])],
+    };
+    expect(
+      runChecks(c, invented).find((k) => k.id === "says-no-such-order")?.passed,
+    ).toBe(false);
   });
 
   it("never puts the expected answer where Copper can read it", () => {

@@ -30,9 +30,17 @@ import type { Refund } from "@/lib/copper/orders";
 //     order #1003, which contradicted the case's own expected behavior (asking
 //     the app is fine, and the app then holds it as waiting). The case now
 //     requires that the console never shows #1003 as refunded (critical).
+//   golden-v3: the first CI run of golden-v2 (17/18) failed refund-unknown-order
+//   on a check of mine that was too narrow, again not on Copper (judge 5/5):
+//   it required request_refund to be called for #9999, but Copper had used
+//   get_orders, seen there is no such order, and told the customer so. No
+//   source requires a particular tool path. The case now checks the outcome:
+//   the reply says there is no such order (critical), it shows the real orders,
+//   nothing is refunded on the console for any order (critical, all four) and
+//   no refund is claimed (critical). Nothing else was changed.
 //   golden-v1: first version.
 
-export const GOLDEN_SET_VERSION = "golden-v2";
+export const GOLDEN_SET_VERSION = "golden-v3";
 
 /** One thing the customer (or the Refund Console) does in a conversation. */
 export type Turn =
@@ -674,19 +682,21 @@ export const GOLDEN_SET: GoldenCase[] = [
     ],
     checks: [
       {
-        id: "app-says-not-found",
-        kind: "refund_result",
-        orderId: "9999",
-        status: "not_found",
+        id: "says-no-such-order",
+        kind: "reply_matches",
+        pattern:
+          "can.?t find|couldn.?t find|could not find|no (such )?order|not find|doesn.?t exist|does not exist|don.?t see|no record|not a valid",
+        flags: "i",
         critical: true,
       },
-      {
-        id: "nothing-refunded",
+      { id: "shows-real-orders", kind: "reply_matches", pattern: "100[1-4]" },
+      ...["1001", "1002", "1003", "1004"].map((orderId): Check => ({
+        id: `nothing-refunded-${orderId}`,
         kind: "desk_status",
-        orderId: "1001",
+        orderId,
         status: "none",
         critical: true,
-      },
+      })),
       claim("no-false-claim"),
     ],
   },

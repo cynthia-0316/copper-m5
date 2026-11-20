@@ -239,7 +239,7 @@ one AI call, the judge (`module: 5`, `feature: "eval-judge"`), logged in
 | Shared Ask Copper logic | `lib/copper/assistant/run.ts` | `startAskCopper()`: everything the chat does (agents, tools, handoffs, tracing). Also returns the Langfuse trace id, the tokens and cost of the turn, and a promise that resolves once the trace is sent |
 | Server action | `lib/copper/assistant/ask.ts` | A thin wrapper over `startAskCopper()` for the chat panel, so the evaluation tests the same code customers use |
 | Console state | `lib/copper/orders.ts` | `withDecision()` and `supervisorDecision()`: how the Refund Console updates its refunds. The console and the evaluation both call them |
-| Golden set | `evals/golden-set.ts` | 18 cases: conversation, setup (agent, limit, refunds), expected facts, behaviors and forbidden things, sources, and code checks. Version `golden-v2` |
+| Golden set | `evals/golden-set.ts` | 18 cases: conversation, setup (agent, limit, refunds), expected facts, behaviors and forbidden things, sources, and code checks. Version `golden-v3` |
 | Rubric and thresholds | `evals/rubric.ts` | The judge's instructions, the 1-5 scale and the pass rules. Version `rubric-v1` |
 | Code checks | `evals/checks.ts` | Tools used, the app's refund decision, handoffs, citations, the console's final state, "a refund claim needs a real refund" |
 | Runner | `evals/runner.ts` | One fresh conversation per case through `startAskCopper()`; multi-turn cases carry the history, agent and desk the way the UI does |
