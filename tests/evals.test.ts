@@ -1062,6 +1062,8 @@ describe("a model that gives no answer, and provider demand errors", () => {
     expect(result.status).toBe("failed");
     expect(run).toHaveBeenCalledTimes(1);
     expect(judge).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("TEMPORARY verification fixture", () => {
   it("the lying-refund fixture goes through the normal judging flow and fails the suite", async () => {
