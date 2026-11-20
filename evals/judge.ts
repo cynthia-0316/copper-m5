@@ -120,7 +120,7 @@ export function verdictPasses(verdict: Verdict): boolean {
 }
 
 /**
- * Judges one case. Temporary errors and an invalid answer are retried (twice
+ * Judges one case. Temporary errors and an invalid answer are retried (four times
  * at most); a low score is just the result. Throws when no valid verdict came.
  */
 export async function judgeCase(
@@ -151,7 +151,8 @@ export async function judgePrompt(
         },
       ),
     {
-      retries: 2,
+      retries: 4,
+      delayMs: 5000,
       // An answer that doesn't fit the schema is retried too; nothing else is.
       retryable: (error) => isTransient(error) || isInvalidOutput(error),
     },

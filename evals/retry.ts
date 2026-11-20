@@ -1,5 +1,6 @@
 // Retries for TEMPORARY failures only: rate limits, server errors, dropped
-// connections. A low score is never retried (that would keep re-rolling the
+// connections, and a model that ended its turn with no answer at all (Gemini
+// stopping with finish reason "other" under load). A low score is never retried (that would keep re-rolling the
 // answer until it happened to pass). Each retry waits a bit longer.
 
 export function isTransient(error: unknown): boolean {
@@ -8,7 +9,7 @@ export function isTransient(error: unknown): boolean {
       ? String((error as { statusCode: unknown }).statusCode)
       : ""
   }`;
-  return /\b(429|500|502|503|504)\b|rate.?limit|quota|overloaded|unavailable|timeout|timed out|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|fetch failed|socket hang up|network/i.test(
+  return /\b(429|500|502|503|504)\b|rate.?limit|quota|overloaded|high demand|try again later|without an answer|unavailable|timeout|timed out|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|fetch failed|socket hang up|network/i.test(
     text,
   );
 }

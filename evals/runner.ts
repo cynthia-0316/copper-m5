@@ -126,6 +126,14 @@ export async function runCase(
         turns,
         desk,
       });
+    // The chat would show its "Sorry, something went wrong" fallback here.
+    // That is the model failing to answer, not an answer to grade: report it
+    // as a temporary error so the case can run again (a few times at most).
+    if (outcome.noAnswer)
+      throw new CaseRunError(
+        `the model ended the turn without an answer (finish reason: ${outcome.finishReason ?? "unknown"})`,
+        { turns, desk },
+      );
     messages.push({ role: "assistant", content: outcome.progress.reply });
     agent = outcome.progress.agent ?? "copper";
     // The console records each refund the app decided.

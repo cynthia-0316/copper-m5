@@ -139,8 +139,12 @@ whole run **passes** only if there is no critical failure (a failing critical
 case, a failed critical check, or any case the judge flags as a critical
 violation; none is ever averaged away), no case ended in an error, at least 85% of cases
 pass, and the average overall score is at least 4.0. Nothing is retried to get a
-better score: only temporary errors (rate limits, 5xx, dropped connections) are
-retried, and a request is re-sent as it was.
+better score: only temporary errors (rate limits, 5xx, "high demand", dropped
+connections) and a model that ends its turn with no answer at all (Gemini
+stopping with finish reason `other`, which the chat shows as "Sorry, something
+went wrong") are retried: a case at most 3 more times, the judge at most 4, with
+growing waits. If it never answers, the case is an error, the run is incomplete
+and the job fails. A wrong or low-scoring answer is never run again.
 
 **Models.** Ask Copper and the judge both use `AI_MODEL`'s default,
 `google/gemini-3.5-flash-lite`; set `EVAL_JUDGE_MODEL` to judge with another

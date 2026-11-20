@@ -11,7 +11,12 @@ import {
   runChecks,
   type TurnRun,
 } from "@/evals/checks";
-import { type CaseResult, evaluateCase, summarize } from "@/evals/evaluate";
+import {
+  type CaseResult,
+  evaluateCase,
+  RUN_RETRIES,
+  summarize,
+} from "@/evals/evaluate";
 import { GOLDEN_SET, type GoldenCase } from "@/evals/golden-set";
 import {
   buildJudgePrompt,
@@ -936,5 +941,126 @@ describe("the judge's critical-violation flag (regression)", () => {
       judge: vi.fn(async () => outcome(verdict({ overall: 3 }))),
     });
     expect(result).toMatchObject({ status: "failed", criticalFailure: false });
+  });
+});
+
+describe("a model that gives no answer, and provider demand errors", () => {
+  const meta = { runId: "r3", commit: "abc", goldenSetVersion: "golden-v3" };
+  const c = byId("notfound-alexa");
+  const good = async (): Promise<CaseRun> => ({
+    turns: [
+      turn(
+        "I couldn't find that in our support docs. Please contact the Copper Crew in the Copper app (Settings > Help).",
+        [tool("search_docs", { matches: [] })],
+        "copper",
+      ),
+    ],
+    desk: { limitUsd: 50, refunds: [] },
+  });
+
+  it("recognises a demand spike and an empty answer as temporary", () => {
+    expect(
+      isTransient(
+        new Error(
+          "Failed after 3 attempts. Last error: This model is currently experiencing high demand. Please try again later.",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isTransient(
+        new Error(
+          "the model ended the turn without an answer (finish reason: other)",
+        ),
+      ),
+    ).toBe(true);
+    expect(isTransient(new Error("the reply was wrong"))).toBe(false);
+  });
+
+  it("runs the case again after an empty answer, and grades the second run", async () => {
+    const run = vi
+      .fn<() => Promise<CaseRun>>()
+      .mockRejectedValueOnce(
+        new CaseRunError(
+          "the model ended the turn without an answer (finish reason: other)",
+          { turns: [], desk: undefined as never },
+        ),
+      )
+      .mockImplementation(good);
+    const result = await evaluateCase(c, meta, {
+      run,
+      judge: vi.fn(async () => outcome(verdict())),
+      sleep: async () => {},
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ status: "passed", attempts: 2 });
+  });
+
+  it("if it never answers, the case is an error and the suite is incomplete (CI fails)", async () => {
+    const run = vi.fn(async (): Promise<CaseRun> => {
+      throw new CaseRunError(
+        "the model ended the turn without an answer (finish reason: other)",
+        { turns: [], desk: undefined as never },
+      );
+    });
+    const result = await evaluateCase(c, meta, {
+      run,
+      judge: vi.fn(async () => outcome(verdict())),
+      sleep: async () => {},
+    });
+    expect(run).toHaveBeenCalledTimes(RUN_RETRIES + 1);
+    expect(result.status).toBe("error");
+    expect(summarize([result], 1)).toMatchObject({
+      verdict: "incomplete",
+      exitCode: 2,
+    });
+  });
+
+  it("the real runner reports a model that produced nothing as that temporary error", async () => {
+    vi.resetModules();
+    vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "AIza-test-key");
+    vi.stubEnv("LANGFUSE_PUBLIC_KEY", "");
+    vi.stubEnv("LANGFUSE_SECRET_KEY", "");
+    vi.stubEnv("LANGFUSE_BASE_URL", "");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream<ModelStreamPart>([
+          {
+            type: "finish",
+            finishReason: { unified: "other", raw: undefined },
+            usage: {
+              inputTokens: {
+                total: 5,
+                noCache: 5,
+                cacheRead: undefined,
+                cacheWrite: undefined,
+              },
+              outputTokens: { total: 0, text: 0, reasoning: undefined },
+            },
+          },
+        ]),
+      }),
+    });
+    const { runCase, CaseRunError: Err } = await import("@/evals/runner");
+    const failure = await runCase(c, { ...meta, attempt: 1 }).catch((e) => e);
+    expect(failure).toBeInstanceOf(Err);
+    expect(failure.message).toMatch(
+      /without an answer \(finish reason: other\)/,
+    );
+    vi.unstubAllEnvs();
+  });
+
+  it("a wrong or low-scoring answer is still never run again", async () => {
+    const run = vi.fn(good);
+    const judge = vi.fn(async () => outcome(verdict({ overall: 1 })));
+    const result = await evaluateCase(c, meta, {
+      run,
+      judge,
+      sleep: async () => {},
+    });
+    expect(result.status).toBe("failed");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(judge).toHaveBeenCalledTimes(1);
   });
 });

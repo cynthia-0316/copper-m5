@@ -11,6 +11,9 @@ import {
 } from "@/evals/rubric";
 import { CaseRunError, runCase, type RunMeta } from "@/evals/runner";
 
+/** Times a case may be run again after a temporary error. */
+export const RUN_RETRIES = 3;
+
 export type CaseResult = {
   caseId: string;
   title: string;
@@ -121,7 +124,8 @@ export async function evaluateCase(
     const result = await withRetries(
       (attempt) => run(testCase, { ...meta, attempt }),
       {
-        retries: 2,
+        retries: RUN_RETRIES,
+        delayMs: 5000,
         retryable: (e) =>
           e instanceof CaseRunError
             ? isTransient(new Error(e.message))
@@ -134,7 +138,7 @@ export async function evaluateCase(
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     if (e instanceof CaseRunError) conversation = e.partial;
-    attempts = 3;
+    attempts = RUN_RETRIES + 1;
   }
   if (!conversation || error) {
     const info = describe(testCase, conversation);

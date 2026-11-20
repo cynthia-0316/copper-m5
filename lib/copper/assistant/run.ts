@@ -71,6 +71,15 @@ export type TurnOutcome = {
   error?: string;
   /** Whether the trace and its spans reached Langfuse. */
   traceSent: boolean;
+  /**
+   * True when the model ended the turn without any answer, so the panel shows
+   * the "Sorry, something went wrong" fallback instead (for example Gemini
+   * stopping with finish reason "other" during a demand spike). The chat shows
+   * the fallback as before; the evaluation treats it as a temporary failure.
+   */
+  noAnswer: boolean;
+  /** The finish reason of the last model step, when there was one. */
+  finishReason?: string;
 };
 
 export type RunResult = AskCopperResult & {
@@ -140,6 +149,7 @@ export function startAskCopper(
   options: RunOptions = {},
 ): RunResult {
   const started = performance.now();
+  let finishReason: string | undefined;
   const stats: TurnStats = {
     modelCalls: 0,
     inputTokens: 0,
@@ -198,6 +208,7 @@ export function startAskCopper(
     for await (const part of result.fullStream) {
       tracer.part(part);
       if (part.type === "finish-step") {
+        finishReason = part.finishReason;
         stats.modelCalls++;
         const { inputTokens, outputTokens } = part.usage;
         stats.inputTokens += inputTokens ?? 0;
@@ -276,6 +287,7 @@ export function startAskCopper(
 
   // Read the stream in the background, so the panel gets the first update now.
   let failure: unknown;
+  let noAnswer = false;
   void (async () => {
     try {
       if (!useTools) {
@@ -311,7 +323,10 @@ export function startAskCopper(
         }
       }
       progress.status = "done";
-      if (!progress.reply.trim()) progress.reply = SORRY;
+      if (!progress.reply.trim()) {
+        noAnswer = true;
+        progress.reply = SORRY;
+      }
     } catch (error) {
       progress.status = "error";
       if (!progress.reply.trim()) progress.reply = SORRY;
@@ -330,6 +345,8 @@ export function startAskCopper(
       progress: snapshot(),
       stats,
       traceSent: sent,
+      noAnswer,
+      ...(finishReason && { finishReason }),
       ...(failure !== undefined && {
         error: failure instanceof Error ? failure.message : String(failure),
       }),
