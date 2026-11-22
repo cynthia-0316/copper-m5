@@ -198,6 +198,40 @@ starting set, not coverage of everything Copper can be asked. A run takes
 several minutes and a few hundred thousand tokens on the free tier, because of
 the 15-requests-a-minute limit.
 
+## Single agent or multi-agent
+
+Ask Copper can answer with **one support agent** or with **Copper plus the Refund
+agent** (handoffs between them). The default is multi-agent, as shipped in Module 4.
+
+```bash
+AGENT_MODE=single npm run dev     # one agent: Copper's tools + the two refund tools, no handoff
+AGENT_MODE=multi  npm run dev     # Copper + the Refund agent (the default)
+```
+
+Both use the same refund rule (`requestRefund`), the same refund wording
+(`REFUND_RULES`) and the same tools. Langfuse traces are tagged `arch:single` or
+`arch:multi`.
+
+To compare them on the same questions, use the architecture-neutral set
+(`golden-v3-neutral`: golden-v3 without the nine checks about handoffs, for both),
+one after the other (the free Gemini tier can't serve two at once):
+
+```bash
+npm run eval -- --agent-mode single --set neutral --concurrency 1 --verify --out eval-results/single
+npm run eval -- --agent-mode multi  --set neutral --concurrency 1 --verify --out eval-results/multi
+npm run collect-retries -- eval-results/single eval-results/multi   # read every attempt back from Langfuse
+npm run verify-langfuse -- eval-results/single eval-results/multi   # traces, experiments, items, scores
+npm run build-comparison -- --runs eval-results/single,eval-results/multi
+```
+
+The full report, with four runs (one of them interrupted and kept as incomplete),
+the sample sizes, the retries, the maintainability analysis and the recommendation,
+is in [docs/agent-comparison.md](docs/agent-comparison.md). The raw results of every
+run are in `docs/agent-comparison/runs/`. In short: both passed every refund and
+safety code check in every valid case; the pass rates (single 35/36, multi 34/34
+valid) differ by one case, and the report recommends shipping multi-agent for the
+refund tools' isolation while saying the data does not show it answers better.
+
 ## Commands
 
 | Command                              | What it does                                          |

@@ -19,6 +19,8 @@ export type RunMetrics = {
   runId: string;
   mode: Mode;
   cases: number;
+  /** Cases with a complete answer (not an error): the base of the averages. */
+  casesMeasured: number;
   passed: number;
   failed: number;
   errors: number;
@@ -44,24 +46,46 @@ export type RunMetrics = {
   handoffs: number;
   /** Cases that needed more than one attempt after a temporary error. */
   casesRetried: number;
+  /** Extra runs of a case after a temporary error (attempts beyond the first). */
+  caseReruns: number;
+  /** Extra tries of the judge call after a temporary error. */
+  judgeRetries: number;
+  /** Cases that ended in an error after every retry: the service, not the answer. */
+  infrastructureErrors: number;
+  /** Cases that were answered and graded, and did not pass: the answer. */
+  qualityFailures: number;
+  /** Whole evaluation, start to finish (includes the Langfuse read-back). */
+  wallClockMs: number | null;
+  startedAt: string;
+  finishedAt: string;
+  commit: string;
+  goldenSetVersion: string;
+  rubricVersion: string;
+  candidateModel: string;
+  judgeModel: string;
+  experimentUrl?: string;
 };
 
-const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+export const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 const sumOrNull = (values: (number | null)[]) =>
   values.some((v) => v === null) ? null : sum(values as number[]);
 
 export function metricsOf(run: SavedRun, label: string): RunMetrics {
   const { results, info, summary } = run;
   const judged = results.filter((r) => r.judge);
-  const latency = results.map((r) => r.candidate.latencyMs);
-  const waited = results.map((r) => r.activity?.rateLimitWaitMs ?? 0);
-  const inTokens = sum(results.map((r) => r.candidate.inputTokens));
-  const outTokens = sum(results.map((r) => r.candidate.outputTokens));
+  // A case that ended in an error has no complete answer, so its partial time
+  // and usage are left out of the averages (and counted as an error instead).
+  const measured = results.filter((r) => r.status !== "error");
+  const latency = measured.map((r) => r.candidate.latencyMs);
+  const waited = measured.map((r) => r.activity?.rateLimitWaitMs ?? 0);
+  const inTokens = sum(measured.map((r) => r.candidate.inputTokens));
+  const outTokens = sum(measured.map((r) => r.candidate.outputTokens));
   return {
     label,
     runId: info.runId,
     mode: (info.agentMode ?? "multi") as Mode,
     cases: results.length,
+    casesMeasured: measured.length,
     passed: summary.passed,
     failed: summary.failed,
     errors: summary.errors,
@@ -72,15 +96,15 @@ export function metricsOf(run: SavedRun, label: string): RunMetrics {
     criticalFailures: results.filter((r) => r.criticalFailure).length,
     judgeCriticalFlags: judged.filter((r) => r.judge!.verdict.criticalViolation)
       .length,
-    averageLatencyMs: results.length ? sum(latency) / results.length : 0,
-    averageLatencyExRateLimitMs: results.length
-      ? (sum(latency) - sum(waited)) / results.length
+    averageLatencyMs: measured.length ? sum(latency) / measured.length : 0,
+    averageLatencyExRateLimitMs: measured.length
+      ? (sum(latency) - sum(waited)) / measured.length
       : 0,
-    modelCalls: sum(results.map((r) => r.candidate.modelCalls)),
+    modelCalls: sum(measured.map((r) => r.candidate.modelCalls)),
     inputTokens: inTokens,
     outputTokens: outTokens,
     totalTokens: inTokens + outTokens,
-    executionCostUsd: sumOrNull(results.map((r) => r.candidate.costUsd)),
+    executionCostUsd: sumOrNull(measured.map((r) => r.candidate.costUsd)),
     judgeCostUsd: sumOrNull(judged.map((r) => r.judge!.costUsd)),
     judgeTokens: sum(
       judged.map(
@@ -89,22 +113,45 @@ export function metricsOf(run: SavedRun, label: string): RunMetrics {
           (r.judge!.usage.outputTokens ?? 0),
       ),
     ),
-    toolCalls: sum(results.map((r) => r.activity?.toolCalls ?? 0)),
-    toolErrors: sum(results.map((r) => r.activity?.toolErrors ?? 0)),
-    handoffs: sum(results.map((r) => r.activity?.handoffs ?? 0)),
+    toolCalls: sum(measured.map((r) => r.activity?.toolCalls ?? 0)),
+    toolErrors: sum(measured.map((r) => r.activity?.toolErrors ?? 0)),
+    handoffs: sum(measured.map((r) => r.activity?.handoffs ?? 0)),
     casesRetried: results.filter((r) => r.attempts > 1).length,
+    caseReruns: sum(results.map((r) => Math.max(0, r.attempts - 1))),
+    judgeRetries: sum(
+      results.map((r) => Math.max(0, (r.judge?.attempts ?? 1) - 1)),
+    ),
+    infrastructureErrors: results.filter((r) => r.status === "error").length,
+    qualityFailures: results.filter((r) => r.status === "failed").length,
+    wallClockMs: wallClock(info.startedAt, info.finishedAt),
+    startedAt: info.startedAt,
+    finishedAt: info.finishedAt,
+    commit: info.commit,
+    goldenSetVersion: info.goldenSetVersion,
+    rubricVersion: info.rubricVersion,
+    candidateModel: info.candidateModel,
+    judgeModel: info.judgeModel,
+    ...(info.langfuse.experimentUrl && {
+      experimentUrl: info.langfuse.experimentUrl,
+    }),
   };
 }
 
+/** Milliseconds between two ISO times, or null when either is missing. */
+function wallClock(start: string, end: string): number | null {
+  const ms = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}
+
 /** Mean of a metric across runs, or null if any run lacks it. */
-const mean = (values: (number | null)[]) => {
+export const mean = (values: (number | null)[]) => {
   const known = values.filter((v): v is number => v !== null);
   return known.length === values.length && known.length
     ? sum(known) / known.length
     : null;
 };
 
-const fmt = (value: number | null, digits = 0) =>
+export const fmt = (value: number | null, digits = 0) =>
   value === null ? "n/a" : value.toFixed(digits);
 
 const usd = (value: number | null) =>

@@ -18,7 +18,10 @@
     "embed-docs": "node scripts/embed-docs.mjs",
     "eval": "tsx --env-file-if-exists=.env.local scripts/run-evals.ts",
     "eval:calibrate": "tsx --env-file-if-exists=.env.local scripts/run-evals.ts --calibrate",
-    "compare-agents": "tsx scripts/compare-agents.ts"
+    "compare-agents": "tsx scripts/compare-agents.ts",
+    "collect-retries": "tsx --env-file-if-exists=.env.local scripts/collect-retries.ts",
+    "build-comparison": "tsx scripts/build-comparison.ts",
+    "verify-langfuse": "tsx --env-file-if-exists=.env.local scripts/verify-langfuse.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "4.0.93",

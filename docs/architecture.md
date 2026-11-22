@@ -283,3 +283,37 @@ answer does not mean tracing finished.
   are named per case; the Bible's wrong facts are deliberately not used.
 - The judge uses the same Gemini model as Copper by default. That is cheap and
   works on a free key, but shares blind spots; `EVAL_JUDGE_MODEL` separates them.
+
+## Module 5: Single agent vs multi-agent
+
+**Summary:** Ask Copper can answer with one support agent (`single`) or with
+Copper plus the Refund agent and handoffs (`multi`, the default). Both run through
+the same `startAskCopper()`, the same tools and the same tracing; the refund rule
+(`requestRefund`) and the refund wording (`REFUND_RULES`) exist once. The full
+comparison, with the runs and a recommendation, is in
+[agent-comparison.md](agent-comparison.md).
+
+| Piece | Where | What it does |
+|---|---|---|
+| Mode | `lib/copper/assistant/mode.ts` | `AGENT_MODE=single\|multi` (default multi); a typo falls back to multi with one warning. The evaluation takes `--agent-mode` |
+| Single agent | `lib/copper/assistant/run.ts` (`agentCall`) | One call with Copper's 5 tools + `get_orders`, `request_refund` and `SINGLE_AGENT_INSTRUCTIONS`; no handoff tool |
+| Shared refund text and tools | `instructions.ts` (`REFUND_RULES`), `tools.ts` (`refundTools`) | Used by the Refund agent and by the single agent; the multi-agent instructions and tools are unchanged (fingerprint tests) |
+| Neutral golden set | `evals/neutral.ts` | golden-v3 minus the nine handoff checks, the same for both architectures; golden-v3 is untouched |
+| Blind judge | `evals/judge.ts` (`blind`) | In the comparison the judge sees "Assistant" and no handoff plumbing |
+| Tracing | `lib/copper/assistant/trace.ts` | Traces are tagged `arch:single` / `arch:multi`; the single agent shows as "Support agent" |
+| Reports | `evals/compare*.ts`, `evals/retry-trace.ts`, `scripts/build-comparison.ts`, `collect-retries.ts` | Read saved results (and Langfuse for retried attempts) and write the tables; a missing number says "not measured" |
+| Langfuse check | `evals/polite.ts`, `evals/langfuse-verify.ts`, `scripts/verify-langfuse.ts` | Reads traces, experiment, items and scores back one request at a time within Langfuse's rate limit, and tells "missing" from "query failed" |
+
+**Langfuse recording.** Dataset item ids are unique across a Langfuse project, so
+every dataset except the original prefixes its name to the case id
+(`datasetItemId`). A failed dataset sync or experiment is reported at once and kept
+in the run's Langfuse detail; the read-back never replaces it.
+
+**Decisions**
+
+- One run function for both architectures, so the evaluation measures what the
+  chat runs and the only difference is the agent arrangement.
+- The comparison uses a neutral case set rather than editing golden-v3: the handoff
+  checks still guard the multi-agent default in pull requests.
+- Numbers that were not measured are reported as such. A case that ended in an
+  error is excluded from averages and counted apart; it is never a zero.

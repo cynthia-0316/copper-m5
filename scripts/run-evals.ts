@@ -240,8 +240,14 @@ async function main() {
     try {
       await syncDataset(lf, RUBRIC_VERSION, setCases, datasetName, setVersion);
       const dataset = await lf.client.dataset.get(datasetName);
+      // Items are matched by the case id kept in their metadata: their own ids
+      // carry the dataset name (see datasetItemId in evals/langfuse.ts).
       const wanted = new Set(cases.map((c) => c.id));
-      const items = dataset.items.filter((item) => wanted.has(item.id));
+      const items = dataset.items.filter((item) =>
+        wanted.has(
+          (item.metadata as { caseId?: string } | undefined)?.caseId ?? item.id,
+        ),
+      );
       if (items.length !== cases.length)
         lf.problems.push(
           `the dataset has ${items.length} of the ${cases.length} cases`,
@@ -292,6 +298,12 @@ async function main() {
       langfuse.experimentUrl = experiment.experimentUrl;
       langfuse.datasetRunId = experiment.datasetRunId;
     } catch (error) {
+      // Say it now, and keep it: without the experiment, the cases below run
+      // without Langfuse experiment items or scores.
+      console.warn(
+        "[langfuse] the experiment could not be recorded; cases run without it:",
+        errorMessage(error),
+      );
       lf.problems.push(`experiment: ${errorMessage(error)}`);
     }
   }
@@ -328,18 +340,25 @@ async function main() {
           0,
         );
       const want = { scores: expected, items: traceIds.length };
-      const found = await readBack(meta.runId, traceIds, want);
+      const found = await readBack(meta.runId, traceIds, want, {
+        since: now.toISOString(),
+      });
       langfuse.complete =
         sent &&
         lf.problems.length === 0 &&
+        !found.error &&
         found.scores >= want.scores &&
         found.items >= want.items;
-      if (found.items < want.items)
-        langfuse.detail = `${found.items} of ${want.items} experiment items were found in Langfuse after waiting`;
-      else if (found.scores < want.scores)
-        langfuse.detail = `${found.scores} of ${want.scores} scores were found in Langfuse after waiting`;
-      else if (langfuse.complete)
-        langfuse.detail = `${found.items} experiment items and ${found.scores} scores read back`;
+      // What was recorded while running (lf.problems) stays in the detail: the
+      // read-back adds to it, never replaces it.
+      const readback = found.error
+        ? `the read-back query FAILED, so this says nothing about whether the data is there: ${found.error}`
+        : found.items < want.items
+          ? `${found.items} of ${want.items} experiment items were MISSING from Langfuse after waiting`
+          : found.scores < want.scores
+            ? `${found.scores} of ${want.scores} scores were MISSING from Langfuse after waiting`
+            : `${found.items} experiment items and ${found.scores} scores read back`;
+      langfuse.detail = [...lf.problems, readback].join(" | ");
     } else {
       langfuse.complete = sent && lf.problems.length === 0;
       if (langfuse.complete) langfuse.detail = "traces and scores sent";
