@@ -67,6 +67,13 @@ runs without it: if any Langfuse variable is missing, the terminal says
    and Sessions (one session per chat). A trace shows the agent, its model
    calls with tokens, cost and latency, the tool calls, and a `handoff` event.
 
+**A public trace to show.** `npm run public-trace` runs one real refund conversation
+(order #1004, over the auto-refund limit, handed from Copper to the Refund agent)
+and records it as a _public_ Langfuse trace: anyone with its link can view it, no
+sign-in. Only server code can ask for that (`publicTrace`); the chat can't. It
+carries only that fictional conversation, so check what a trace holds before making
+it public.
+
 The trace tree and what is (and isn't) sent are described in
 [docs/architecture.md](docs/architecture.md#module-5-langfuse-tracing). Cost is
 an estimate from list prices (`lib/ai/pricing.ts`); tokens are what the model

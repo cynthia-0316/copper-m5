@@ -10,7 +10,13 @@ import {
   type GoldenCase,
 } from "@/evals/golden-set";
 import type { RunMeta } from "@/evals/runner";
-import { allPages, type Getter, politeGetter } from "@/evals/polite";
+import {
+  allPages,
+  type FailureKind,
+  failureKind,
+  type Getter,
+  politeGetter,
+} from "@/evals/polite";
 import { flushTraces, langfuseConfig } from "@/lib/ai/langfuse";
 
 // Sends an evaluation to Langfuse (the only evals and monitoring tool the
@@ -365,6 +371,8 @@ export type ReadBack = {
    * wasn't answered. Without it, fewer than expected means the data is not there.
    */
   error?: string;
+  /** Why it failed: rate limit, bad query, network... (see evals/polite.ts). */
+  errorKind?: FailureKind;
 };
 
 /**
@@ -412,6 +420,7 @@ export async function readBack(
       found = {
         ...found,
         error: error instanceof Error ? error.message : String(error),
+        errorKind: failureKind(error),
       };
     }
     if (

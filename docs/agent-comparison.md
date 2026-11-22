@@ -124,6 +124,8 @@ change between the two runs of one architecture are noise.
 |---|---|---|
 | Runs | 2 | 2 |
 | Cases evaluated | 36 scheduled, 36 valid | 36 scheduled, **34 valid** (2 infrastructure errors) |
+| Valid sample (n) behind every average below (judge score, latency, model calls, tokens, cost) | n = 36 | n = 34 |
+| Excluded from the averages, and why | none | 2 cases: infrastructure errors in run 3 (never graded); not counted as 0 and not counted as wrong answers |
 | Pass rate, of valid cases | 97.2% (35/36) | 100% (34/34) |
 | Pass rate, scheduled cases (errors count as not passed) | 97.2% | 94.4% |
 | Average judge score | 4.94 | 5.00 |
@@ -299,7 +301,13 @@ A case that ended in an error is excluded from averages and counted here; it is 
 
 Checked after the runs with the Langfuse API, one request at a time and within its
 rate limit, asking separately about traces, the experiment, its items and the
-scores. A failed query was kept apart from missing data.
+scores. A failed query was kept apart from missing data, and a failure says why:
+**rate limit** (HTTP 429, with the wait Langfuse asks for), **bad query** (HTTP 400,
+404 or 422), **not authorized** (401 or 403), **Langfuse server error** (5xx) or
+**network** (the connection never reached Langfuse). A 429 is waited out as told and a
+dead connection is tried again a few times, with a growing wait; only a question
+that was answered and returned nothing is called "missing". The verification was
+run twice, before and after these safeguards, with the same result.
 
 | Run | Traces | Experiment | Experiment items | Scores |
 |---|---|---|---|---|

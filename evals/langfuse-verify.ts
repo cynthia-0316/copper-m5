@@ -1,6 +1,11 @@
 import type { CaseResult } from "@/evals/evaluate";
 import { evaluationsFor } from "@/evals/langfuse";
-import type { Getter } from "@/evals/polite";
+import {
+  FAILURE_LABEL,
+  type FailureKind,
+  failureKind,
+  type Getter,
+} from "@/evals/polite";
 import type { RunInfo } from "@/evals/report";
 
 // Checks, one at a time and read-only, that what a run sent to Langfuse is
@@ -12,7 +17,7 @@ import type { RunInfo } from "@/evals/report";
 export type Check =
   | { state: "ok"; found: number; expected: number }
   | { state: "missing"; found: number; expected: number; detail: string }
-  | { state: "query_failed"; detail: string };
+  | { state: "query_failed"; kind: FailureKind; detail: string };
 
 export type RunVerification = {
   runId: string;
@@ -52,6 +57,7 @@ async function pages(get: Getter, path: string): Promise<Row[]> {
 
 const failed = (error: unknown): Check => ({
   state: "query_failed",
+  kind: failureKind(error),
   detail: error instanceof Error ? error.message : String(error),
 });
 
@@ -94,10 +100,14 @@ export async function verifyRun(
   const wanted = new Set(traceIds);
   const out: RunVerification = {
     runId,
-    traces: { state: "query_failed", detail: "not run" },
-    experiment: { state: "query_failed", detail: "not run" },
-    experimentItems: { state: "query_failed", detail: "not run" },
-    scores: { state: "query_failed", detail: "not run" },
+    traces: { state: "query_failed", kind: "other", detail: "not run" },
+    experiment: { state: "query_failed", kind: "other", detail: "not run" },
+    experimentItems: {
+      state: "query_failed",
+      kind: "other",
+      detail: "not run",
+    },
+    scores: { state: "query_failed", kind: "other", detail: "not run" },
   };
 
   try {
@@ -186,5 +196,5 @@ export function describeCheck(check: Check): string {
   if (check.state === "ok") return `ok (${check.found}/${check.expected})`;
   if (check.state === "missing")
     return `MISSING (${check.found}/${check.expected}): ${check.detail}`;
-  return `QUERY FAILED: ${check.detail}`;
+  return `QUERY FAILED (${FAILURE_LABEL[check.kind]}): ${check.detail}`;
 }

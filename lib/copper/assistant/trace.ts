@@ -61,6 +61,12 @@ export type TurnInfo = {
   firstAgent: Agent;
   /** The architecture answering: shown on the trace, as a tag and in metadata. */
   agentMode?: "single" | "multi";
+  /**
+   * Makes the trace publicly viewable by anyone with its link (Langfuse's
+   * "share"). Server code only, for a trace made to be shown: a demo
+   * conversation. Never set from anything a visitor sends.
+   */
+  publicTrace?: boolean;
   /** Langfuse tags and metadata for the trace (the evaluation sets these). */
   tags?: string[];
   metadata?: Record<string, string>;
@@ -169,6 +175,8 @@ export function startTurn(info: TurnInfo): TurnTracer {
     tag(turn);
     if (tags.length)
       turn.otelSpan.setAttribute(LangfuseOtelSpanAttributes.TRACE_TAGS, tags);
+    if (info.publicTrace)
+      turn.otelSpan.setAttribute(LangfuseOtelSpanAttributes.TRACE_PUBLIC, true);
     for (const [key, value] of Object.entries(metadata))
       turn.otelSpan.setAttribute(
         `${LangfuseOtelSpanAttributes.TRACE_METADATA}.${key}`,

@@ -54,6 +54,8 @@ export type AskCopperResult = { progress: Live<Progress> };
 export type RunOptions = {
   /** Which architecture answers; AGENT_MODE (default multi) if omitted. */
   agentMode?: AgentMode;
+  /** Make this turn's Langfuse trace publicly viewable (a demo; server only). */
+  publicTrace?: boolean;
   tags?: string[];
   metadata?: Record<string, string>;
   environment?: string;

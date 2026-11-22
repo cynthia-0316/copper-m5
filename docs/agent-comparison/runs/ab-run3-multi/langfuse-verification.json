@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-11-22T16:18:12.747Z",
+  "checkedAt": "2026-11-22T21:42:22.558Z",
   "runId": "20261122-0634-ce68fd1-multi-5fmw",
   "traces": {
     "state": "ok",
@@ -10,7 +10,7 @@
     "state": "missing",
     "found": 0,
     "expected": 1,
-    "detail": "the query worked and returned 0 experiment(s), none named 20261122-0634-ce68fd1-multi-5fmw"
+    "detail": "the query worked and returned 1 experiment(s), none named 20261122-0634-ce68fd1-multi-5fmw"
   },
   "experimentItems": {
     "state": "missing",

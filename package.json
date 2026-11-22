@@ -21,7 +21,8 @@
     "compare-agents": "tsx scripts/compare-agents.ts",
     "collect-retries": "tsx --env-file-if-exists=.env.local scripts/collect-retries.ts",
     "build-comparison": "tsx scripts/build-comparison.ts",
-    "verify-langfuse": "tsx --env-file-if-exists=.env.local scripts/verify-langfuse.ts"
+    "verify-langfuse": "tsx --env-file-if-exists=.env.local scripts/verify-langfuse.ts",
+    "public-trace": "tsx --env-file-if-exists=.env.local scripts/public-refund-trace.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "4.0.93",

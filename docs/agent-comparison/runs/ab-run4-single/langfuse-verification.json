@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-11-22T16:18:23.174Z",
+  "checkedAt": "2026-11-22T21:42:38.171Z",
   "runId": "20261122-1606-ce68fd1-single-uq8v",
   "traces": {
     "state": "ok",
@@ -10,7 +10,7 @@
     "state": "missing",
     "found": 0,
     "expected": 1,
-    "detail": "the query worked and returned 0 experiment(s), none named 20261122-1606-ce68fd1-single-uq8v"
+    "detail": "the query worked and returned 1 experiment(s), none named 20261122-1606-ce68fd1-single-uq8v"
   },
   "experimentItems": {
     "state": "missing",

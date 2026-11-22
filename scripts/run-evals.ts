@@ -352,7 +352,7 @@ async function main() {
       // What was recorded while running (lf.problems) stays in the detail: the
       // read-back adds to it, never replaces it.
       const readback = found.error
-        ? `the read-back query FAILED, so this says nothing about whether the data is there: ${found.error}`
+        ? `the read-back query FAILED (${found.errorKind ?? "other"}), so this says nothing about whether the data is there: ${found.error}`
         : found.items < want.items
           ? `${found.items} of ${want.items} experiment items were MISSING from Langfuse after waiting`
           : found.scores < want.scores

@@ -16,7 +16,13 @@ import {
 } from "@/evals/langfuse";
 import { describeCheck, verifyRun } from "@/evals/langfuse-verify";
 import { NEUTRAL_SET, NEUTRAL_VERSION } from "@/evals/neutral";
-import { allPages, LangfuseHttpError, politeGetter } from "@/evals/polite";
+import {
+  allPages,
+  failureKind,
+  LangfuseHttpError,
+  LangfuseNetworkError,
+  politeGetter,
+} from "@/evals/polite";
 
 describe("dataset items", () => {
   it("keeps the plain case id in the original dataset and prefixes any other dataset", () => {
@@ -142,6 +148,97 @@ describe("the polite Langfuse reader", () => {
       .mockResolvedValueOnce({ data: [3] });
     expect(await allPages<number>(get, "/p?limit=2")).toEqual([1, 2, 3]);
     expect(get.mock.calls[1][0]).toContain("cursor=c1");
+  });
+});
+
+describe("why a question to Langfuse failed", () => {
+  const reply = (status: number, body: unknown) => ({
+    status,
+    text: async () => JSON.stringify(body),
+  });
+
+  it("names rate limit, bad query, authorization and server errors apart", () => {
+    const http = (status: number) =>
+      new LangfuseHttpError(status, "/api/public/x", "{}");
+    expect(failureKind(http(429))).toBe("rate_limit");
+    expect(failureKind(http(400))).toBe("bad_request");
+    expect(failureKind(http(404))).toBe("bad_request");
+    expect(failureKind(http(403))).toBe("not_authorized");
+    expect(failureKind(http(503))).toBe("server");
+    expect(
+      failureKind(new LangfuseNetworkError("/api/public/x", "ENOTFOUND")),
+    ).toBe("network");
+    expect(failureKind(new Error("something else"))).toBe("other");
+  });
+
+  it("retries a connection that never reached Langfuse, then answers", async () => {
+    const waits: number[] = [];
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValue(reply(200, { data: ["ok"] }));
+    const get = politeGetter({
+      send,
+      sleep: async (ms) => void waits.push(ms),
+    });
+    expect(await get("/api/public/x")).toEqual({ data: ["ok"] });
+    expect(send).toHaveBeenCalledTimes(3);
+    // a growing wait between tries
+    expect(waits.filter((w) => w >= 5000)).toEqual([5000, 10000]);
+  });
+
+  it("gives up on a dead connection after a few tries and reports it as a network failure", async () => {
+    const send = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    const get = politeGetter({
+      send,
+      networkRetries: 2,
+      sleep: async () => {},
+    });
+    const error = await get("/api/public/x").catch((e) => e);
+    expect(error).toBeInstanceOf(LangfuseNetworkError);
+    expect(failureKind(error)).toBe("network");
+    expect(send).toHaveBeenCalledTimes(3);
+  });
+
+  it("a verification says WHY it failed, and 'missing' only when the question was answered", async () => {
+    const saved = {
+      info: {
+        runId: "RUN",
+        commit: "ce68fd1",
+        goldenSetVersion: NEUTRAL_VERSION,
+        rubricVersion: "rubric-v1",
+        candidateModel: "m",
+        judgeModel: "m",
+        startedAt: "2026-11-22T06:00:00Z",
+        finishedAt: "2026-11-22T06:10:00Z",
+        langfuse: { enabled: true, complete: false, detail: "" },
+      },
+      results: [],
+    };
+    const limited = await verifyRun(saved, async (path) => {
+      throw new LangfuseHttpError(429, path, "{}");
+    });
+    expect(limited.traces).toMatchObject({
+      state: "query_failed",
+      kind: "rate_limit",
+    });
+    expect(describeCheck(limited.traces)).toContain(
+      "QUERY FAILED (rate limit)",
+    );
+    const wrong = await verifyRun(saved, async (path) => {
+      throw new LangfuseHttpError(400, path, "bad limit");
+    });
+    expect(describeCheck(wrong.scores)).toContain("QUERY FAILED (bad query)");
+    const offline = await verifyRun(saved, async (path) => {
+      throw new LangfuseNetworkError(path, "ENOTFOUND");
+    });
+    expect(describeCheck(offline.experiment)).toContain(
+      "QUERY FAILED (network)",
+    );
+    // The query worked and returned nothing: that is "missing", a different thing.
+    const empty = await verifyRun(saved, async () => ({ data: [] }));
+    expect(empty.experiment.state).toBe("missing");
   });
 });
 
