@@ -1,0 +1,91 @@
+name: Eval
+
+# The golden-set evaluation of Ask Copper (Module 5): the real Ask Copper
+# answers a fixed set of questions, an AI judge (Gemini) grades each answer,
+# and the scores go to Langfuse. The `eval` job is a required status check
+# for main, next to `check` (ci.yml): if it fails, the PR can't be merged.
+#
+# It uses repository secrets, so it never runs with them for code from a fork
+# (GitHub gives forks no secrets, and this uses `pull_request`, not
+# `pull_request_target`). Instead of skipping, the job FAILS and says why: a
+# skipped required check would count as passed.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      # First, before any of the PR's code runs: are the secrets here?
+      - name: Check the evaluation can run
+        env:
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+        run: |
+          fail() {
+            echo "::error title=Evaluation blocked::$1"
+            {
+              echo "## Golden-set evaluation: ⚠️ BLOCKED"
+              echo
+              echo "$1"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          if [ "$IS_FORK" = "true" ]; then
+            fail "This pull request comes from a fork, and GitHub does not give secrets to forks, so the evaluation cannot run. A maintainer has to push the branch to this repository and open the pull request from there."
+          fi
+          missing=""
+          for name in GOOGLE_GENERATIVE_AI_API_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_BASE_URL; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            fail "These repository secrets are missing or empty:$missing. Add them in Settings > Secrets and variables > Actions, or run: gh secret set -f .env.local (from the project folder)."
+          fi
+          echo "All four evaluation secrets are set."
+
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # The judge must tell good, wrong and lying answers apart before its
+      # grades count.
+      - name: Calibrate the judge
+        env:
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+        run: npm run eval:calibrate
+
+      - name: Run the golden set
+        timeout-minutes: 30
+        env:
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          EVAL_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: npm run eval -- --ci
+
+      - name: Keep the per-case results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results/
+          if-no-files-found: warn

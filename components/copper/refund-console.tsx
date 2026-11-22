@@ -19,6 +19,8 @@ import {
   getOrders,
   type Refund,
   type RefundResult,
+  supervisorDecision,
+  withDecision,
 } from "@/lib/copper/orders";
 
 const ORDERS = getOrders();
@@ -57,35 +59,15 @@ export function RefundConsole({ aiConfigured }: { aiConfigured: boolean }) {
 
   /** The app's decision on a refund, from the chat. */
   function onDecision(result: RefundResult) {
-    if (result.status !== "refunded" && result.status !== "needs_approval")
-      return;
-    const { orderId, item, amountUsd } = result;
-    const status = result.status === "refunded" ? "refunded" : "waiting";
-    setRefunds((all) =>
-      all.some((r) => r.orderId === orderId)
-        ? all
-        : [...all, { orderId, item, amountUsd, status, by: "auto" }],
-    );
+    setRefunds((all) => withDecision(all, result));
   }
 
   /** Your decision on a waiting refund. The chat tells the Refund agent. */
   function decide(refund: Refund, approve: boolean) {
-    if (!refunds.some((r) => r === refund && r.status === "waiting")) return;
-    setRefunds((all) =>
-      all.map((r) =>
-        r === refund
-          ? {
-              ...r,
-              status: approve ? "refunded" : "rejected",
-              by: "supervisor",
-            }
-          : r,
-      ),
-    );
-    setNote((last) => ({
-      id: (last?.id ?? 0) + 1,
-      text: `[Refund Console] A supervisor ${approve ? "approved" : "rejected"} the ${formatUsd(refund.amountUsd)} refund for order #${refund.orderId} (${refund.item}).${approve ? " It has been refunded." : " It will not be refunded."}`,
-    }));
+    const decision = supervisorDecision(refunds, refund, approve);
+    if (!decision) return;
+    setRefunds(decision.refunds);
+    setNote((last) => ({ id: (last?.id ?? 0) + 1, text: decision.note }));
   }
 
   return (
