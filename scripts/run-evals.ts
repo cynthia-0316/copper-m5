@@ -31,7 +31,7 @@ import {
   recordJudgeTrace,
   syncDataset,
 } from "@/evals/langfuse";
-import { writeReport, type RunInfo } from "@/evals/report";
+import { annotationsFor, writeReport, type RunInfo } from "@/evals/report";
 import { RUBRIC_VERSION } from "@/evals/rubric";
 import { enableModelThrottle } from "@/evals/throttle";
 import { isAiConfigured } from "@/lib/ai/call";
@@ -395,6 +395,10 @@ async function main() {
   if (langfuse.experimentUrl)
     console.log(`Langfuse experiment: ${langfuse.experimentUrl}`);
   console.log(`Results: ${OUT}/results.json, results.csv, summary.md`);
+  // In GitHub Actions, put the scores where the pull request's checks show them.
+  if (process.env.GITHUB_ACTIONS === "true")
+    for (const line of annotationsFor(info, summary, results))
+      console.log(line);
   process.exit(summary.exitCode);
 }
 
