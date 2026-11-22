@@ -5,6 +5,8 @@ import type { CaseResult, Summary } from "@/evals/evaluate";
 export type RunInfo = {
   runId: string;
   commit: string;
+  /** Which architecture answered. */
+  agentMode?: "single" | "multi";
   goldenSetVersion: string;
   rubricVersion: string;
   candidateModel: string;
@@ -51,6 +53,7 @@ export function markdownSummary(
     "",
     `- Cases: **${summary.total}** | passed **${summary.passed}** | failed **${summary.failed}** | errors **${summary.errors}**`,
     `- Pass rate **${(summary.passRate * 100).toFixed(0)}%**; average judge score **${summary.averageOverall?.toFixed(2) ?? "n/a"}** / 5`,
+    `- Architecture: **${info.agentMode ?? "multi"}-agent**`,
     `- Run \`${info.runId}\` on commit \`${info.commit.slice(0, 7)}\`; golden set \`${info.goldenSetVersion}\`, rubric \`${info.rubricVersion}\``,
     `- Ask Copper model \`${info.candidateModel}\`; judge model \`${info.judgeModel}\` (temperature 0)`,
   ];

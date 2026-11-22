@@ -4,6 +4,9 @@
 //   0 = passed, 1 = quality below the bar (a failed or critical case),
 //   2 = could not finish (a missing key, errors, Langfuse not reached).
 // Flags: --only id,id   --concurrency N   --out dir   --calibrate   --no-langfuse
+//   --agent-mode single|multi   which architecture answers (AGENT_MODE, else multi)
+//   --set original|neutral      golden-v3, or golden-v3-neutral (no handoff
+//                               checks) for comparing the two architectures
 //   --verify   (read every score back from Langfuse)
 //   --ci       (Langfuse is required, and everything is read back from it)
 import { execFileSync } from "node:child_process";
@@ -15,7 +18,9 @@ import {
   GOLDEN_SET_VERSION,
   type GoldenCase,
 } from "@/evals/golden-set";
-import { judgeModel } from "@/evals/judge";
+import { judgeCase, judgeModel } from "@/evals/judge";
+import { NEUTRAL_SET, NEUTRAL_VERSION } from "@/evals/neutral";
+import { agentMode, parseAgentMode } from "@/lib/copper/assistant/mode";
 import {
   readBack,
   DATASET_NAME,
@@ -127,10 +132,21 @@ async function main() {
   const tracing = wantLangfuse && ensureTracing();
   const lf = tracing ? openLangfuse() : undefined;
 
+  // Which architecture answers, and which set of cases is asked.
+  const requestedMode = option("agent-mode");
+  const mode =
+    requestedMode === undefined ? agentMode() : parseAgentMode(requestedMode);
+  if (!mode) blocked(`--agent-mode must be "single" or "multi"`);
+  const setName = option("set") ?? "original";
+  if (setName !== "original" && setName !== "neutral")
+    blocked(`--set must be "original" or "neutral"`);
+  const neutral = setName === "neutral";
+  const setCases = neutral ? NEUTRAL_SET : GOLDEN_SET;
+  const setVersion = neutral ? NEUTRAL_VERSION : GOLDEN_SET_VERSION;
+  const datasetName = neutral ? `${DATASET_NAME}-neutral` : DATASET_NAME;
+
   const only = option("only")?.split(",");
-  const cases = only
-    ? GOLDEN_SET.filter((c) => only.includes(c.id))
-    : GOLDEN_SET;
+  const cases = only ? setCases.filter((c) => only.includes(c.id)) : setCases;
   if (only && cases.length !== only.length)
     blocked(
       `unknown case id in --only: ${only.filter((id) => !cases.some((c) => c.id === id)).join(", ")}`,
@@ -144,12 +160,13 @@ async function main() {
     .replace("T", "-");
   const sha = commit();
   const meta = {
-    runId: `${stamp}-${sha.slice(0, 7)}-${Math.random().toString(36).slice(2, 6)}`,
+    agentMode: mode,
+    runId: `${stamp}-${sha.slice(0, 7)}-${mode}-${Math.random().toString(36).slice(2, 6)}`,
     commit: sha,
-    goldenSetVersion: GOLDEN_SET_VERSION,
+    goldenSetVersion: setVersion,
   };
   console.log(
-    `Evaluating ${cases.length} case(s): run ${meta.runId}, ${GOLDEN_SET_VERSION}, ${RUBRIC_VERSION}, Ask Copper ${defaultModel()}, judge ${judgeModel()}, concurrency ${CONCURRENCY}` +
+    `Evaluating ${cases.length} case(s): run ${meta.runId}, ${mode}-agent, ${setVersion}, ${RUBRIC_VERSION}, Ask Copper ${defaultModel()}, judge ${judgeModel()}, concurrency ${CONCURRENCY}` +
       (lf ? ", Langfuse on" : ", Langfuse off"),
   );
 
@@ -158,7 +175,17 @@ async function main() {
     let result: CaseResult;
     try {
       result = await withTimeout(
-        evaluateCase(testCase, meta),
+        evaluateCase(
+          testCase,
+          meta,
+          // Comparing architectures: the judge must not be able to tell them
+          // apart, so it sees "Assistant" and no handoff plumbing.
+          neutral
+            ? {
+                judge: (c, r) => judgeCase(c, r, undefined, { blind: true }),
+              }
+            : {},
+        ),
         CASE_TIMEOUT_MS,
         testCase.id,
       );
@@ -211,8 +238,8 @@ async function main() {
     // case's Ask Copper turns are recorded inside the experiment item's trace.
     registerTracingGlobally();
     try {
-      await syncDataset(lf, RUBRIC_VERSION);
-      const dataset = await lf.client.dataset.get(DATASET_NAME);
+      await syncDataset(lf, RUBRIC_VERSION, setCases, datasetName, setVersion);
+      const dataset = await lf.client.dataset.get(datasetName);
       const wanted = new Set(cases.map((c) => c.id));
       const items = dataset.items.filter((item) => wanted.has(item.id));
       if (items.length !== cases.length)
@@ -220,12 +247,13 @@ async function main() {
           `the dataset has ${items.length} of the ${cases.length} cases`,
         );
       const experiment = await lf.client.experiment.run({
-        name: "Ask Copper golden set",
+        name: `Ask Copper ${mode}-agent (${setVersion})`,
         runName: meta.runId,
-        description: `Golden set ${GOLDEN_SET_VERSION}, rubric ${RUBRIC_VERSION}, on commit ${meta.commit.slice(0, 7)}`,
+        description: `${mode}-agent, golden set ${setVersion}, rubric ${RUBRIC_VERSION}, on commit ${meta.commit.slice(0, 7)}`,
         metadata: {
+          agentMode: mode,
           commit: meta.commit,
-          goldenSetVersion: GOLDEN_SET_VERSION,
+          goldenSetVersion: setVersion,
           rubricVersion: RUBRIC_VERSION,
           candidateModel: defaultModel(),
           judgeModel: judgeModel(),
@@ -328,7 +356,8 @@ async function main() {
   const info: RunInfo = {
     runId: meta.runId,
     commit: meta.commit,
-    goldenSetVersion: GOLDEN_SET_VERSION,
+    agentMode: mode,
+    goldenSetVersion: setVersion,
     rubricVersion: RUBRIC_VERSION,
     candidateModel: defaultModel(),
     judgeModel: judgeModel(),

@@ -59,6 +59,8 @@ export type TurnInfo = {
   question: string;
   useTools: boolean;
   firstAgent: Agent;
+  /** The architecture answering: shown on the trace, as a tag and in metadata. */
+  agentMode?: "single" | "multi";
   /** Langfuse tags and metadata for the trace (the evaluation sets these). */
   tags?: string[];
   metadata?: Record<string, string>;
@@ -133,6 +135,17 @@ function safe(warned: { value: boolean }, run: () => void) {
 export function startTurn(info: TurnInfo): TurnTracer {
   if (!ensureTracing()) return NOOP;
   const warned = { value: false };
+  // The single support agent isn't "Copper": say which architecture ran.
+  const label = (agent: Agent) =>
+    info.agentMode === "single" ? "Support agent" : AGENT_NAMES[agent];
+  const tags = [
+    ...(info.agentMode ? [`arch:${info.agentMode}`] : []),
+    ...(info.tags ?? []),
+  ];
+  const metadata = {
+    ...(info.agentMode && { agentMode: info.agentMode }),
+    ...info.metadata,
+  };
   // The session id goes on every observation, so each one carries it to
   // Langfuse and no other chat's turn can land in this chat's session.
   const tag = (observation: {
@@ -154,12 +167,9 @@ export function startTurn(info: TurnInfo): TurnTracer {
       TRACE_NAME,
     );
     tag(turn);
-    if (info.tags?.length)
-      turn.otelSpan.setAttribute(
-        LangfuseOtelSpanAttributes.TRACE_TAGS,
-        info.tags,
-      );
-    for (const [key, value] of Object.entries(info.metadata ?? {}))
+    if (tags.length)
+      turn.otelSpan.setAttribute(LangfuseOtelSpanAttributes.TRACE_TAGS, tags);
+    for (const [key, value] of Object.entries(metadata))
       turn.otelSpan.setAttribute(
         `${LangfuseOtelSpanAttributes.TRACE_METADATA}.${key}`,
         value,
@@ -224,7 +234,7 @@ export function startTurn(info: TurnInfo): TurnTracer {
         model = nextModel;
         steps = 0;
         agent = turn.startObservation(
-          AGENT_NAMES[next],
+          label(next),
           {
             input: clip(info.question),
             metadata: { agent: next, model: googleId(nextModel) },
@@ -244,7 +254,7 @@ export function startTurn(info: TurnInfo): TurnTracer {
             stepText = "";
             firstToken = false;
             step = startObservation(
-              `${AGENT_NAMES[agentName]} model call ${steps}`,
+              `${label(agentName)} model call ${steps}`,
               {
                 model: model ? googleId(model) : undefined,
                 metadata: { agent: agentName, step: steps },

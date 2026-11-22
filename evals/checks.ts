@@ -21,6 +21,8 @@ export type TurnRun = {
     outputTokens: number;
     costUsd: number | null;
     latencyMs: number;
+    /** Time inside latencyMs spent waiting for our own request limiter. */
+    rateLimitWaitMs?: number;
   };
 };
 

@@ -11,6 +11,13 @@
 
 const GOOGLE = "generativelanguage.googleapis.com";
 
+let waitedMs = 0;
+
+/** Milliseconds this process has spent waiting for the rate limit so far. */
+export function rateLimitWaitedMs(): number {
+  return waitedMs;
+}
+
 export function installModelThrottle(
   perMinute = Number(process.env.EVAL_REQUESTS_PER_MINUTE ?? 12),
   fetchImpl: typeof fetch = globalThis.fetch,
@@ -19,6 +26,10 @@ export function installModelThrottle(
 ): typeof fetch {
   if (!(perMinute > 0)) return fetchImpl;
   const sent: number[] = [];
+  const wait = async (ms: number) => {
+    waitedMs += ms;
+    await sleep(ms);
+  };
 
   async function slot() {
     for (;;) {
@@ -28,7 +39,7 @@ export function installModelThrottle(
         sent.push(now());
         return;
       }
-      await sleep(Math.max(250, sent[0] + 60_000 - now() + 50));
+      await wait(Math.max(250, sent[0] + 60_000 - now() + 50));
     }
   }
 
@@ -46,7 +57,7 @@ export function installModelThrottle(
       if (response.status !== 429 || attempt >= 4) return response;
       const body = await response.clone().text();
       const seconds = Number(/retry in ([\d.]+)\s*s/i.exec(body)?.[1] ?? 20);
-      await sleep((seconds + 1) * 1000);
+      await wait((seconds + 1) * 1000);
     }
   };
 }

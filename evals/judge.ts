@@ -44,15 +44,29 @@ const clip = (value: unknown, max: number) => {
  * JSON strings, so nothing inside them can look like the end of a block or
  * like an instruction from us.
  */
-export function buildJudgePrompt(testCase: GoldenCase, run: CaseRun): string {
+/**
+ * `blind`: for comparing architectures. Every assistant turn is just
+ * "Assistant", the tool list shows only the business tools, and handoffs and
+ * transfer_* calls are left out, so the judge can't tell which architecture
+ * answered. Everything the customer or the business cares about stays.
+ */
+export type PromptOptions = { blind?: boolean };
+
+export function buildJudgePrompt(
+  testCase: GoldenCase,
+  run: CaseRun,
+  options: PromptOptions = {},
+): string {
+  const { blind = false } = options;
   const conversation = run.turns.flatMap((turn) => [
     {
       speaker: turn.kind === "supervisor" ? "Refund Console" : "Customer",
       text: turn.input,
     },
     {
-      speaker:
-        (turn.progress.agent ?? "copper") === "refund"
+      speaker: blind
+        ? "Assistant"
+        : (turn.progress.agent ?? "copper") === "refund"
           ? "Refund agent"
           : "Copper",
       text: turn.progress.reply,
@@ -62,15 +76,17 @@ export function buildJudgePrompt(testCase: GoldenCase, run: CaseRun): string {
     turn: index + 1,
     calls: turn.progress.steps.flatMap<Record<string, unknown>>((step) =>
       step.type === "tool"
-        ? [
-            {
-              agent: step.agent ?? "copper",
-              tool: step.name,
-              input: step.input,
-              result: clip(step.output, 2500),
-            },
-          ]
-        : step.type === "handoff"
+        ? blind && step.name.startsWith("transfer_to_")
+          ? []
+          : [
+              {
+                ...(!blind && { agent: step.agent ?? "copper" }),
+                tool: step.name,
+                input: step.input,
+                result: clip(step.output, 2500),
+              },
+            ]
+        : step.type === "handoff" && !blind
           ? [{ handoff: `${step.from} → ${step.to}` }]
           : [],
     ),
@@ -127,8 +143,9 @@ export async function judgeCase(
   testCase: GoldenCase,
   run: CaseRun,
   model: ModelId = judgeModel(),
+  options: PromptOptions = {},
 ): Promise<JudgeOutcome> {
-  const prompt = buildJudgePrompt(testCase, run);
+  const prompt = buildJudgePrompt(testCase, run, options);
   return judgePrompt(prompt, model);
 }
 

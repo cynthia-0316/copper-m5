@@ -5,6 +5,8 @@ import {
   type AskCopperRequest,
   type ChatMessage,
 } from "@/lib/copper/assistant/run";
+import type { AgentMode } from "@/lib/copper/assistant/mode";
+import { rateLimitWaitedMs } from "@/evals/throttle";
 import type { Agent, ToolStep } from "@/lib/copper/assistant/progress";
 import {
   type Desk,
@@ -21,6 +23,8 @@ import {
 // The expected answers are never given to Copper.
 
 export type RunMeta = {
+  /** Which architecture answers (single or multi). */
+  agentMode?: AgentMode;
   runId: string;
   commit: string;
   goldenSetVersion: string;
@@ -93,7 +97,9 @@ export async function runCase(
         agent,
       }),
     };
+    const waitBefore = rateLimitWaitedMs();
     const started = startAskCopper(request, {
+      ...(meta.agentMode && { agentMode: meta.agentMode }),
       tags: [
         "eval",
         `eval-run:${meta.runId}`,
@@ -107,6 +113,7 @@ export async function runCase(
         goldenSetVersion: meta.goldenSetVersion,
         attempt: String(meta.attempt),
         turn: String(turns.length + 1),
+        ...(meta.agentMode && { agentMode: meta.agentMode }),
       },
     });
     // The turn is over once its trace has been sent, not when the answer is
@@ -117,7 +124,12 @@ export async function runCase(
       kind,
       progress: outcome.progress,
       traceId: started.traceId,
-      stats: outcome.stats,
+      // With one case at a time, the waits are this turn's own; they are
+      // reported apart so latency isn't blamed on our own request limiter.
+      stats: {
+        ...outcome.stats,
+        rateLimitWaitMs: Math.round(rateLimitWaitedMs() - waitBefore),
+      },
       ...(outcome.error && { error: outcome.error }),
     };
     turns.push(run);

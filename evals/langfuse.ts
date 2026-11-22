@@ -4,7 +4,11 @@ import {
   startObservation,
 } from "@langfuse/tracing";
 import type { CaseResult } from "@/evals/evaluate";
-import { GOLDEN_SET, GOLDEN_SET_VERSION } from "@/evals/golden-set";
+import {
+  GOLDEN_SET,
+  GOLDEN_SET_VERSION,
+  type GoldenCase,
+} from "@/evals/golden-set";
 import type { RunMeta } from "@/evals/runner";
 import { flushTraces, langfuseConfig } from "@/lib/ai/langfuse";
 
@@ -57,7 +61,20 @@ const NUMERIC = [
   ["overall", "overall"],
 ] as const;
 
+/** What the support agent(s) used for a case, one score each (execution only). */
+export const EXECUTION_SCORE_NAMES = [
+  "exec_model_calls",
+  "exec_input_tokens",
+  "exec_output_tokens",
+  "exec_cost_usd",
+  "exec_latency_ms",
+  "exec_tool_calls",
+  "exec_tool_errors",
+  "exec_handoffs",
+];
+
 export const SCORE_NAMES = [
+  ...EXECUTION_SCORE_NAMES,
   "correctness",
   "groundedness",
   "rule_compliance",
@@ -71,10 +88,11 @@ export const SCORE_NAMES = [
 /** Scores in the experiment's evaluator format; the SDK attaches them. */
 export function evaluationsFor(
   result: CaseResult,
-  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion">,
+  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion" | "agentMode">,
   rubricVersion: string,
 ): Evaluation[] {
   const metadata = {
+    ...(meta.agentMode && { agentMode: meta.agentMode }),
     caseId: result.caseId,
     runId: meta.runId,
     commit: meta.commit,
@@ -84,6 +102,35 @@ export function evaluationsFor(
     critical: result.critical,
   };
   const out: Evaluation[] = [];
+  // The cost of answering the customer, apart from the cost of judging it.
+  const c = result.candidate;
+  const a = result.activity;
+  const exec = (name: string, value: number, comment?: string) =>
+    out.push({
+      name,
+      value,
+      dataType: "NUMERIC",
+      metadata,
+      ...(comment && { comment }),
+    });
+  exec("exec_model_calls", c.modelCalls);
+  exec("exec_input_tokens", c.inputTokens);
+  exec("exec_output_tokens", c.outputTokens);
+  // Cost is an estimate from list prices; left out when tokens were unknown.
+  if (c.costUsd !== null)
+    exec(
+      "exec_cost_usd",
+      c.costUsd,
+      "estimate: reported tokens x Google list prices (lib/ai/pricing.ts)",
+    );
+  exec(
+    "exec_latency_ms",
+    c.latencyMs,
+    `includes ${a?.rateLimitWaitMs ?? 0} ms waiting for the evaluation's own request limiter`,
+  );
+  exec("exec_tool_calls", a?.toolCalls ?? 0);
+  exec("exec_tool_errors", a?.toolErrors ?? 0);
+  exec("exec_handoffs", a?.handoffs ?? 0);
   if (result.judge) {
     const { verdict } = result.judge;
     for (const [name, key] of NUMERIC)
@@ -131,7 +178,7 @@ export function evaluationsFor(
 /** The judge's own model call, as its own trace, with usage and cost. */
 export function recordJudgeTrace(
   result: CaseResult,
-  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion">,
+  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion" | "agentMode">,
   rubricVersion: string,
 ) {
   const judge = result.judge;
@@ -153,6 +200,7 @@ export function recordJudgeTrace(
       },
       ...(judge.costUsd !== null && { costDetails: { total: judge.costUsd } }),
       metadata: {
+        ...(meta.agentMode && { agentMode: meta.agentMode }),
         caseId: result.caseId,
         runId: meta.runId,
         commit: meta.commit,
@@ -182,6 +230,7 @@ export function recordJudgeTrace(
     "judge",
     `eval-run:${meta.runId}`,
     `case:${result.caseId}`,
+    ...(meta.agentMode ? [`arch:${meta.agentMode}`] : []),
   ]);
   set(LangfuseOtelSpanAttributes.ENVIRONMENT, "eval");
   span.end(end);
@@ -251,16 +300,22 @@ export const DATASET_NAME = "copper-golden-set";
  * contain as the expected output. Items are keyed by case id, so running this
  * again updates them instead of adding copies.
  */
-export async function syncDataset(lf: LangfuseRun, rubricVersion: string) {
+export async function syncDataset(
+  lf: LangfuseRun,
+  rubricVersion: string,
+  cases: GoldenCase[] = GOLDEN_SET,
+  datasetName: string = DATASET_NAME,
+  version: string = GOLDEN_SET_VERSION,
+) {
   await lf.client.api.datasets.create({
-    name: DATASET_NAME,
+    name: datasetName,
     description:
       "Ask Copper golden set: fixed questions with the facts, behaviors and rules a correct answer needs. Created from evals/golden-set.ts.",
-    metadata: { goldenSetVersion: GOLDEN_SET_VERSION, rubricVersion },
+    metadata: { goldenSetVersion: version, rubricVersion },
   });
-  for (const testCase of GOLDEN_SET)
+  for (const testCase of cases)
     await lf.client.api.datasetItems.create({
-      datasetName: DATASET_NAME,
+      datasetName,
       id: testCase.id,
       input: {
         surface: testCase.surface,
@@ -277,7 +332,7 @@ export async function syncDataset(lf: LangfuseRun, rubricVersion: string) {
         critical: testCase.critical,
         sources: testCase.sources,
         checks: testCase.checks,
-        goldenSetVersion: GOLDEN_SET_VERSION,
+        goldenSetVersion: version,
         rubricVersion,
       },
     });
