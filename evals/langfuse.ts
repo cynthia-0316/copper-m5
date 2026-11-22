@@ -4,8 +4,19 @@ import {
   startObservation,
 } from "@langfuse/tracing";
 import type { CaseResult } from "@/evals/evaluate";
-import { GOLDEN_SET, GOLDEN_SET_VERSION } from "@/evals/golden-set";
+import {
+  GOLDEN_SET,
+  GOLDEN_SET_VERSION,
+  type GoldenCase,
+} from "@/evals/golden-set";
 import type { RunMeta } from "@/evals/runner";
+import {
+  allPages,
+  type FailureKind,
+  failureKind,
+  type Getter,
+  politeGetter,
+} from "@/evals/polite";
 import { flushTraces, langfuseConfig } from "@/lib/ai/langfuse";
 
 // Sends an evaluation to Langfuse (the only evals and monitoring tool the
@@ -57,7 +68,20 @@ const NUMERIC = [
   ["overall", "overall"],
 ] as const;
 
+/** What the support agent(s) used for a case, one score each (execution only). */
+export const EXECUTION_SCORE_NAMES = [
+  "exec_model_calls",
+  "exec_input_tokens",
+  "exec_output_tokens",
+  "exec_cost_usd",
+  "exec_latency_ms",
+  "exec_tool_calls",
+  "exec_tool_errors",
+  "exec_handoffs",
+];
+
 export const SCORE_NAMES = [
+  ...EXECUTION_SCORE_NAMES,
   "correctness",
   "groundedness",
   "rule_compliance",
@@ -71,10 +95,11 @@ export const SCORE_NAMES = [
 /** Scores in the experiment's evaluator format; the SDK attaches them. */
 export function evaluationsFor(
   result: CaseResult,
-  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion">,
+  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion" | "agentMode">,
   rubricVersion: string,
 ): Evaluation[] {
   const metadata = {
+    ...(meta.agentMode && { agentMode: meta.agentMode }),
     caseId: result.caseId,
     runId: meta.runId,
     commit: meta.commit,
@@ -84,6 +109,35 @@ export function evaluationsFor(
     critical: result.critical,
   };
   const out: Evaluation[] = [];
+  // The cost of answering the customer, apart from the cost of judging it.
+  const c = result.candidate;
+  const a = result.activity;
+  const exec = (name: string, value: number, comment?: string) =>
+    out.push({
+      name,
+      value,
+      dataType: "NUMERIC",
+      metadata,
+      ...(comment && { comment }),
+    });
+  exec("exec_model_calls", c.modelCalls);
+  exec("exec_input_tokens", c.inputTokens);
+  exec("exec_output_tokens", c.outputTokens);
+  // Cost is an estimate from list prices; left out when tokens were unknown.
+  if (c.costUsd !== null)
+    exec(
+      "exec_cost_usd",
+      c.costUsd,
+      "estimate: reported tokens x Google list prices (lib/ai/pricing.ts)",
+    );
+  exec(
+    "exec_latency_ms",
+    c.latencyMs,
+    `includes ${a?.rateLimitWaitMs ?? 0} ms waiting for the evaluation's own request limiter`,
+  );
+  exec("exec_tool_calls", a?.toolCalls ?? 0);
+  exec("exec_tool_errors", a?.toolErrors ?? 0);
+  exec("exec_handoffs", a?.handoffs ?? 0);
   if (result.judge) {
     const { verdict } = result.judge;
     for (const [name, key] of NUMERIC)
@@ -131,7 +185,7 @@ export function evaluationsFor(
 /** The judge's own model call, as its own trace, with usage and cost. */
 export function recordJudgeTrace(
   result: CaseResult,
-  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion">,
+  meta: Pick<RunMeta, "runId" | "commit" | "goldenSetVersion" | "agentMode">,
   rubricVersion: string,
 ) {
   const judge = result.judge;
@@ -153,6 +207,7 @@ export function recordJudgeTrace(
       },
       ...(judge.costUsd !== null && { costDetails: { total: judge.costUsd } }),
       metadata: {
+        ...(meta.agentMode && { agentMode: meta.agentMode }),
         caseId: result.caseId,
         runId: meta.runId,
         commit: meta.commit,
@@ -182,6 +237,7 @@ export function recordJudgeTrace(
     "judge",
     `eval-run:${meta.runId}`,
     `case:${result.caseId}`,
+    ...(meta.agentMode ? [`arch:${meta.agentMode}`] : []),
   ]);
   set(LangfuseOtelSpanAttributes.ENVIRONMENT, "eval");
   span.end(end);
@@ -251,17 +307,23 @@ export const DATASET_NAME = "copper-golden-set";
  * contain as the expected output. Items are keyed by case id, so running this
  * again updates them instead of adding copies.
  */
-export async function syncDataset(lf: LangfuseRun, rubricVersion: string) {
+export async function syncDataset(
+  lf: LangfuseRun,
+  rubricVersion: string,
+  cases: GoldenCase[] = GOLDEN_SET,
+  datasetName: string = DATASET_NAME,
+  version: string = GOLDEN_SET_VERSION,
+) {
   await lf.client.api.datasets.create({
-    name: DATASET_NAME,
+    name: datasetName,
     description:
       "Ask Copper golden set: fixed questions with the facts, behaviors and rules a correct answer needs. Created from evals/golden-set.ts.",
-    metadata: { goldenSetVersion: GOLDEN_SET_VERSION, rubricVersion },
+    metadata: { goldenSetVersion: version, rubricVersion },
   });
-  for (const testCase of GOLDEN_SET)
+  for (const testCase of cases)
     await lf.client.api.datasetItems.create({
-      datasetName: DATASET_NAME,
-      id: testCase.id,
+      datasetName,
+      id: datasetItemId(datasetName, testCase.id),
       input: {
         surface: testCase.surface,
         startingAgent: testCase.agent ?? "copper",
@@ -277,71 +339,97 @@ export async function syncDataset(lf: LangfuseRun, rubricVersion: string) {
         critical: testCase.critical,
         sources: testCase.sources,
         checks: testCase.checks,
-        goldenSetVersion: GOLDEN_SET_VERSION,
+        goldenSetVersion: version,
         rubricVersion,
       },
     });
 }
 
 /**
- * Reads the run's scores back from Langfuse (`/api/public/v3/scores`) and
- * returns how many of the expected ones are there. Langfuse takes a while to
- * make new data visible, so this waits (up to `waitMs`) for all of them.
+ * Dataset item ids are unique across the whole Langfuse project, not per
+ * dataset. The original dataset keeps the plain case id (its items already
+ * exist under it); any other dataset (the architecture-neutral one) prefixes
+ * its name, so the same case can live in both. The case id is also kept in
+ * each item's metadata.caseId, which is what a run reads it back by.
+ */
+export const datasetItemId = (datasetName: string, caseId: string) =>
+  datasetName === DATASET_NAME ? caseId : `${datasetName}:${caseId}`;
+
+type ReadRow = {
+  name?: string;
+  experimentName?: string;
+  traceId?: string;
+  subject?: { traceId?: string };
+};
+
+export type ReadBack = {
+  scores: number;
+  items: number;
+  /**
+   * Set when the last attempt to ask Langfuse FAILED (an HTTP error). The
+   * counts are then not evidence that data is missing: only that the question
+   * wasn't answered. Without it, fewer than expected means the data is not there.
+   */
+  error?: string;
+  /** Why it failed: rate limit, bad query, network... (see evals/polite.ts). */
+  errorKind?: FailureKind;
+};
+
+/**
+ * Reads the run's experiment items and scores back from Langfuse, one request
+ * at a time and within its rate limit (evals/polite.ts), and waits for them to
+ * appear: Langfuse takes a while to make new data visible. `since` is when
+ * the run started.
  */
 export async function readBack(
   runId: string,
   traceIds: string[],
   expected: { scores: number; items: number },
-  waitMs = 180_000,
-): Promise<{ scores: number; items: number }> {
+  options: { since: string; waitMs?: number; get?: Getter } = {
+    since: new Date(Date.now() - 6 * 3600_000).toISOString(),
+  },
+): Promise<ReadBack> {
+  const { since, waitMs = 240_000, get = politeGetter() } = options;
   const deadline = Date.now() + waitMs;
   const wanted = new Set(traceIds);
-  const from = new Date(Date.now() - 6 * 3600_000).toISOString();
+  const enc = encodeURIComponent;
+  const from = new Date(Date.parse(since) - 5 * 60_000).toISOString();
   const to = new Date(Date.now() + 3600_000).toISOString();
-  let found = { scores: 0, items: 0 };
+  let found: ReadBack = { scores: 0, items: 0 };
   for (;;) {
     try {
-      let scores = 0;
-      for (const name of SCORE_NAMES) {
-        let cursor: string | undefined;
-        do {
-          const body = (await api(
-            `/api/public/v3/scores?limit=100&fields=core,subject&name=${name}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-          )) as {
-            data?: { subject?: { traceId?: string } }[];
-            meta?: { cursor?: string };
-          };
-          scores += (body.data ?? []).filter(
-            (s) => s.subject?.traceId && wanted.has(s.subject.traceId),
-          ).length;
-          cursor = body.meta?.cursor;
-        } while (cursor);
-      }
-      // The experiment's items: one per case, linked to the dataset item.
-      let items = 0;
-      let cursor: string | undefined;
-      do {
-        const body = (await api(
-          `/api/public/experiment-items?limit=100&fromStartTime=${encodeURIComponent(from)}&toStartTime=${encodeURIComponent(to)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-        )) as {
-          data?: { experimentName?: string; traceId?: string }[];
-          meta?: { cursor?: string };
-        };
-        items += (body.data ?? []).filter(
-          (i) =>
-            i.experimentName === runId && i.traceId && wanted.has(i.traceId),
-        ).length;
-        cursor = body.meta?.cursor;
-      } while (cursor);
-      found = { scores, items };
-    } catch {
-      // Try again until the deadline: the API can be briefly unavailable.
+      const items = (
+        await allPages<ReadRow>(
+          get,
+          `/api/public/experiment-items?fromStartTime=${enc(from)}&toStartTime=${enc(to)}&limit=100`,
+        )
+      ).filter(
+        (i) => i.experimentName === runId && i.traceId && wanted.has(i.traceId),
+      );
+      const scores = (
+        await allPages<ReadRow>(
+          get,
+          `/api/public/v3/scores?fields=${enc("core,subject")}&fromTimestamp=${enc(from)}&toTimestamp=${enc(to)}&limit=100`,
+        )
+      ).filter((s) => s.subject?.traceId && wanted.has(s.subject.traceId));
+      found = {
+        scores: scores.length,
+        items: new Set(items.map((i) => i.traceId)).size,
+      };
+    } catch (error) {
+      found = {
+        ...found,
+        error: error instanceof Error ? error.message : String(error),
+        errorKind: failureKind(error),
+      };
     }
     if (
-      (found.scores >= expected.scores && found.items >= expected.items) ||
-      Date.now() > deadline
+      (found.scores >= expected.scores &&
+        found.items >= expected.items &&
+        !found.error) ||
+      Date.now() >= deadline
     )
       return found;
-    await new Promise((r) => setTimeout(r, 6000));
+    await new Promise((r) => setTimeout(r, 10_000));
   }
 }

@@ -293,8 +293,12 @@ export const transferToRefundAgent = tool({
   execute: async () => ({ handedTo: "Refund agent" }),
 });
 
-/** The Refund agent's own tools (Module 4). Copper can't use these. */
-export function refundAgentTools(desk: Desk) {
+/**
+ * The refund business tools: look at the orders and ask the app for a refund.
+ * The Refund agent (multi-agent) and the single support agent both use these
+ * same two tools, so the refund rule exists once (lib/copper/orders.ts).
+ */
+export function refundTools(desk: Desk) {
   return {
     get_orders: tool({
       description:
@@ -310,6 +314,13 @@ export function refundAgentTools(desk: Desk) {
       }),
       execute: async ({ orderId }) => requestRefund(orderId, desk),
     }),
+  };
+}
+
+/** The Refund agent's own tools (Module 4). Copper can't use these. */
+export function refundAgentTools(desk: Desk) {
+  return {
+    ...refundTools(desk),
     transfer_to_copper: tool({
       description:
         "Hands the customer back to Copper for anything that isn't a refund (products, prices, stock, setup, policies). Copper answers next, so write no reply of your own.",

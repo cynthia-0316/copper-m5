@@ -16,6 +16,7 @@ import { defaultModel, type ModelId } from "@/lib/ai/models";
 import { costUsd } from "@/lib/ai/pricing";
 import {
   COPPER_HANDOFF,
+  SINGLE_AGENT_INSTRUCTIONS,
   COPPER_INSTRUCTIONS,
   REFUND_AGENT_INSTRUCTIONS,
 } from "@/lib/copper/assistant/instructions";
@@ -24,9 +25,11 @@ import type {
   Progress,
   ToolStep,
 } from "@/lib/copper/assistant/progress";
+import { type AgentMode, agentMode } from "@/lib/copper/assistant/mode";
 import {
   copperTools,
   refundAgentTools,
+  refundTools,
   transferToRefundAgent,
 } from "@/lib/copper/assistant/tools";
 import { startTurn, type TurnTracer } from "@/lib/copper/assistant/trace";
@@ -49,6 +52,10 @@ export type AskCopperResult = { progress: Live<Progress> };
 
 /** Options only server code can set (the evaluation); never from the browser. */
 export type RunOptions = {
+  /** Which architecture answers; AGENT_MODE (default multi) if omitted. */
+  agentMode?: AgentMode;
+  /** Make this turn's Langfuse trace publicly viewable (a demo; server only). */
+  publicTrace?: boolean;
   tags?: string[];
   metadata?: Record<string, string>;
   environment?: string;
@@ -116,7 +123,21 @@ function agentCall(
   messages: ChatMessage[],
   model: ModelId,
   desk?: Desk,
+  mode: AgentMode = "multi",
 ) {
+  // Single-agent: one agent with Copper's tools and the two refund tools, no
+  // handoff tools, so nothing can hand the conversation to anyone else.
+  if (mode === "single" && desk)
+    return callStream(
+      { module: 5, feature: "single-agent", model },
+      {
+        messages,
+        providerOptions: THOUGHT_SUMMARIES,
+        instructions: SINGLE_AGENT_INSTRUCTIONS,
+        tools: { ...copperTools, ...refundTools(desk) },
+        stopWhen: [stepCountIs(MAX_STEPS)],
+      },
+    );
   if (agent === "refund" && desk)
     return callStream(
       { module: 4, feature: "refund-agent", model },
@@ -159,7 +180,9 @@ export function startAskCopper(
   };
   const outcome = Promise.withResolvers<TurnOutcome>();
   const { live, update, done } = createLive<Progress>();
-  const first: Agent = desk && useTools ? agent : "copper";
+  const mode = options.agentMode ?? agentMode();
+  // Single-agent has one agent only; who answered last turn doesn't matter.
+  const first: Agent = mode === "multi" && desk && useTools ? agent : "copper";
   const model = defaultModel();
   // One Langfuse trace per turn; its session is the chat. The id comes from
   // the browser, so a bad one is replaced instead of trusted.
@@ -170,6 +193,7 @@ export function startAskCopper(
     useTools,
     firstAgent: first,
     ...options,
+    agentMode: mode,
   });
   // Langfuse gets the trace after the reply, and the host keeps the request
   // alive until it is sent.
@@ -308,7 +332,7 @@ export function startAskCopper(
           tracer.startAgent(current, model);
           const next = await follow(
             current,
-            agentCall(current, messages, model, desk),
+            agentCall(current, messages, model, desk, mode),
           );
           const handingOff =
             next && next !== current && handoffs < MAX_HANDOFFS;

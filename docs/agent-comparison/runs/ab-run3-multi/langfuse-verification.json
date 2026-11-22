@@ -1,0 +1,93 @@
+{
+  "checkedAt": "2026-11-22T21:42:22.558Z",
+  "runId": "20261122-0634-ce68fd1-multi-5fmw",
+  "traces": {
+    "state": "ok",
+    "found": 16,
+    "expected": 16
+  },
+  "experiment": {
+    "state": "missing",
+    "found": 0,
+    "expected": 1,
+    "detail": "the query worked and returned 1 experiment(s), none named 20261122-0634-ce68fd1-multi-5fmw"
+  },
+  "experimentItems": {
+    "state": "missing",
+    "found": 0,
+    "expected": 16,
+    "detail": "experiment items for some cases were not returned"
+  },
+  "scores": {
+    "state": "missing",
+    "found": 0,
+    "expected": 256,
+    "detail": "16 score name(s) have fewer scores than were sent"
+  },
+  "scoreShortfall": {
+    "exec_model_calls": {
+      "found": 0,
+      "expected": 16
+    },
+    "exec_input_tokens": {
+      "found": 0,
+      "expected": 16
+    },
+    "exec_output_tokens": {
+      "found": 0,
+      "expected": 16
+    },
+    "exec_cost_usd": {
+      "found": 0,
+      "expected": 16
+    },
+    "exec_latency_ms": {
+      "found": 0,
+      "expected": 16
+    },
+    "exec_tool_calls": {
+      "found": 0,
+      "expected": 16
+    },
+    "exec_tool_errors": {
+      "found": 0,
+      "expected": 16
+    },
+    "exec_handoffs": {
+      "found": 0,
+      "expected": 16
+    },
+    "correctness": {
+      "found": 0,
+      "expected": 16
+    },
+    "groundedness": {
+      "found": 0,
+      "expected": 16
+    },
+    "rule_compliance": {
+      "found": 0,
+      "expected": 16
+    },
+    "tool_fidelity": {
+      "found": 0,
+      "expected": 16
+    },
+    "overall": {
+      "found": 0,
+      "expected": 16
+    },
+    "critical_violation": {
+      "found": 0,
+      "expected": 16
+    },
+    "deterministic_pass": {
+      "found": 0,
+      "expected": 16
+    },
+    "case_pass": {
+      "found": 0,
+      "expected": 16
+    }
+  }
+}

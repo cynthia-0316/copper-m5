@@ -48,6 +48,15 @@ export type CaseResult = {
   }[];
   /** The trace of the judged reply (the last turn). Scores attach to it. */
   finalTraceId?: string;
+  /** What the support agent(s) did, counted from the transcript. */
+  activity?: {
+    toolCalls: number;
+    /** Tool calls that ended in an error (the tool threw). */
+    toolErrors: number;
+    handoffs: number;
+    /** Time inside the latency spent waiting for our own request limiter. */
+    rateLimitWaitMs: number;
+  };
   candidate: {
     modelCalls: number;
     inputTokens: number;
@@ -98,7 +107,25 @@ function describe(testCase: GoldenCase, run: CaseRun | undefined) {
       latencyMs: 0,
     },
   );
-  return { turns, candidate, finalTraceId: turns.at(-1)?.traceId, testCase };
+  // What the support agent(s) did, counted from the real transcript.
+  const steps = (run?.turns ?? []).flatMap((t) => t.progress.steps);
+  const tools = steps.filter((s) => s.type === "tool");
+  const activity = {
+    toolCalls: tools.length,
+    toolErrors: tools.filter((s) => s.state === "error").length,
+    handoffs: steps.filter((s) => s.type === "handoff").length,
+    rateLimitWaitMs: (run?.turns ?? []).reduce(
+      (n, t) => n + (t.stats.rateLimitWaitMs ?? 0),
+      0,
+    ),
+  };
+  return {
+    turns,
+    candidate,
+    activity,
+    finalTraceId: turns.at(-1)?.traceId,
+    testCase,
+  };
 }
 
 /** Runs one case through Copper, checks it, judges it, and decides pass/fail. */
@@ -153,6 +180,7 @@ export async function evaluateCase(
       turns: info.turns,
       finalTraceId: info.finalTraceId,
       candidate: info.candidate,
+      activity: info.activity,
     };
   }
 
@@ -211,6 +239,7 @@ export async function evaluateCase(
     turns: info.turns,
     finalTraceId: info.finalTraceId,
     candidate: info.candidate,
+    activity: info.activity,
   };
 }
 

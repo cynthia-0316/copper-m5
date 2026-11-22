@@ -27,6 +27,10 @@ jobs:
     name: eval
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # pull-requests: write only to put the scores on the pull request as a comment.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       # First, before any of the PR's code runs: are the secrets here?
       - name: Check the evaluation can run
@@ -81,6 +85,19 @@ jobs:
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           EVAL_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: npm run eval -- --ci
+
+      # The scores, case by case, on the pull request itself: visible to anyone
+      # who opens it. A comment that can't be posted never changes the result.
+      - name: Show the scores on the pull request
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f eval-results/summary.md ]; then
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file eval-results/summary.md --edit-last --create-if-none
+          fi
 
       - name: Keep the per-case results
         if: always()

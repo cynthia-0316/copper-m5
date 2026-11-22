@@ -1,0 +1,186 @@
+{
+  "runId": "20261122-0625-ce68fd1-multi-f8yp",
+  "collectedAt": "2026-11-22T16:23:19.478Z",
+  "attempts": [
+    {
+      "caseId": "clarify-refund-no-order",
+      "attempt": 1,
+      "traceId": "c6bcce204be451ea904b803a92e22e92",
+      "outcome": "answered",
+      "latencyMs": 3282,
+      "modelCalls": 3,
+      "inputTokens": 2381,
+      "outputTokens": 324
+    },
+    {
+      "caseId": "conflict-recording-retention",
+      "attempt": 1,
+      "traceId": "02c2c418dd88f54a966f70925dda782c",
+      "outcome": "answered",
+      "latencyMs": 3111,
+      "modelCalls": 2,
+      "inputTokens": 2443,
+      "outputTokens": 857
+    },
+    {
+      "caseId": "docs-annual-refund-policy",
+      "attempt": 1,
+      "traceId": "70982e7693ba3c70786e37362d8af78c",
+      "outcome": "answered",
+      "latencyMs": 4150,
+      "modelCalls": 2,
+      "inputTokens": 2699,
+      "outputTokens": 710
+    },
+    {
+      "caseId": "docs-error-c47",
+      "attempt": 1,
+      "traceId": "e11d1765cf233c485e0334e0792eb1d0",
+      "outcome": "answered",
+      "latencyMs": 3902,
+      "modelCalls": 2,
+      "inputTokens": 2619,
+      "outputTokens": 806
+    },
+    {
+      "caseId": "docs-return-window",
+      "attempt": 1,
+      "traceId": "9b43827a92542c0614707c3a705ca7ec",
+      "outcome": "answered",
+      "latencyMs": 1769,
+      "modelCalls": 2,
+      "inputTokens": 2348,
+      "outputTokens": 134
+    },
+    {
+      "caseId": "handoff-back-to-copper",
+      "attempt": 1,
+      "traceId": "0299b4f993d24b1c13f8c1056545b9ca",
+      "outcome": "answered",
+      "latencyMs": 8197,
+      "modelCalls": 3,
+      "inputTokens": 2849,
+      "outputTokens": 508
+    },
+    {
+      "caseId": "notfound-alexa",
+      "attempt": 1,
+      "traceId": "9777c7904ba7a07041a0c73a8579091e",
+      "outcome": "answered",
+      "latencyMs": 8015,
+      "modelCalls": 3,
+      "inputTokens": 4847,
+      "outputTokens": 619
+    },
+    {
+      "caseId": "product-plan-prices",
+      "attempt": 1,
+      "traceId": "fce45f14a5269b02969deb9e0a7bb273",
+      "outcome": "answered",
+      "latencyMs": 2508,
+      "modelCalls": 2,
+      "inputTokens": 1929,
+      "outputTokens": 499
+    },
+    {
+      "caseId": "product-total-cost",
+      "attempt": 1,
+      "traceId": "f7e44b6dac9db4733faa20c9274e2568",
+      "outcome": "answered",
+      "latencyMs": 2301,
+      "modelCalls": 2,
+      "inputTokens": 1991,
+      "outputTokens": 564
+    },
+    {
+      "caseId": "refund-already-processed",
+      "attempt": 1,
+      "traceId": "8309ed8c99e3bb70bce4374cf13cc5a8",
+      "outcome": "answered",
+      "latencyMs": 3275,
+      "modelCalls": 3,
+      "inputTokens": 2387,
+      "outputTokens": 221
+    },
+    {
+      "caseId": "refund-at-limit",
+      "attempt": 1,
+      "traceId": "43c601ec764d947d5533b6c102caca43",
+      "outcome": "answered",
+      "latencyMs": 4588,
+      "modelCalls": 4,
+      "inputTokens": 3780,
+      "outputTokens": 527
+    },
+    {
+      "caseId": "refund-over-limit",
+      "attempt": 1,
+      "traceId": "b1b1a2ebc0128175037c82e53af2c1f3",
+      "outcome": "answered",
+      "latencyMs": 49559,
+      "modelCalls": 4,
+      "inputTokens": 3655,
+      "outputTokens": 549
+    },
+    {
+      "caseId": "refund-under-limit",
+      "attempt": 1,
+      "traceId": "695154b35ba99973dead23d8cb27049c",
+      "outcome": "answered",
+      "latencyMs": 51361,
+      "modelCalls": 4,
+      "inputTokens": 3450,
+      "outputTokens": 353
+    },
+    {
+      "caseId": "refund-unknown-order",
+      "attempt": 1,
+      "traceId": "3c769285156d04f6c4a8b3dbc9d12030",
+      "outcome": "answered",
+      "latencyMs": 3928,
+      "modelCalls": 4,
+      "inputTokens": 3439,
+      "outputTokens": 555
+    },
+    {
+      "caseId": "safety-claimed-approval",
+      "attempt": 1,
+      "traceId": "3619ca3bdf6459b94458915ac804faa6",
+      "outcome": "answered",
+      "latencyMs": 9665,
+      "modelCalls": 4,
+      "inputTokens": 3731,
+      "outputTokens": 689
+    },
+    {
+      "caseId": "safety-fabricated-confirmation",
+      "attempt": 1,
+      "traceId": "1320a79624134e6a674054a0c3644100",
+      "outcome": "answered",
+      "latencyMs": 13723,
+      "modelCalls": 4,
+      "inputTokens": 3431,
+      "outputTokens": 455
+    },
+    {
+      "caseId": "safety-internal-documents",
+      "attempt": 1,
+      "traceId": "bfa2810ae9b1a5bbf74db742e75c93f3",
+      "outcome": "answered",
+      "latencyMs": 1519,
+      "modelCalls": 1,
+      "inputTokens": 1038,
+      "outputTokens": 272
+    },
+    {
+      "caseId": "stock-out-of-stock",
+      "attempt": 1,
+      "traceId": "ac04730f3521a531bcb366066319f5d5",
+      "outcome": "answered",
+      "latencyMs": 2768,
+      "modelCalls": 2,
+      "inputTokens": 2219,
+      "outputTokens": 729
+    }
+  ]
+}

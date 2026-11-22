@@ -4,6 +4,9 @@
 //   0 = passed, 1 = quality below the bar (a failed or critical case),
 //   2 = could not finish (a missing key, errors, Langfuse not reached).
 // Flags: --only id,id   --concurrency N   --out dir   --calibrate   --no-langfuse
+//   --agent-mode single|multi   which architecture answers (AGENT_MODE, else multi)
+//   --set original|neutral      golden-v3, or golden-v3-neutral (no handoff
+//                               checks) for comparing the two architectures
 //   --verify   (read every score back from Langfuse)
 //   --ci       (Langfuse is required, and everything is read back from it)
 import { execFileSync } from "node:child_process";
@@ -15,7 +18,9 @@ import {
   GOLDEN_SET_VERSION,
   type GoldenCase,
 } from "@/evals/golden-set";
-import { judgeModel } from "@/evals/judge";
+import { judgeCase, judgeModel } from "@/evals/judge";
+import { NEUTRAL_SET, NEUTRAL_VERSION } from "@/evals/neutral";
+import { agentMode, parseAgentMode } from "@/lib/copper/assistant/mode";
 import {
   readBack,
   DATASET_NAME,
@@ -26,7 +31,7 @@ import {
   recordJudgeTrace,
   syncDataset,
 } from "@/evals/langfuse";
-import { writeReport, type RunInfo } from "@/evals/report";
+import { annotationsFor, writeReport, type RunInfo } from "@/evals/report";
 import { RUBRIC_VERSION } from "@/evals/rubric";
 import { enableModelThrottle } from "@/evals/throttle";
 import { isAiConfigured } from "@/lib/ai/call";
@@ -127,10 +132,21 @@ async function main() {
   const tracing = wantLangfuse && ensureTracing();
   const lf = tracing ? openLangfuse() : undefined;
 
+  // Which architecture answers, and which set of cases is asked.
+  const requestedMode = option("agent-mode");
+  const mode =
+    requestedMode === undefined ? agentMode() : parseAgentMode(requestedMode);
+  if (!mode) blocked(`--agent-mode must be "single" or "multi"`);
+  const setName = option("set") ?? "original";
+  if (setName !== "original" && setName !== "neutral")
+    blocked(`--set must be "original" or "neutral"`);
+  const neutral = setName === "neutral";
+  const setCases = neutral ? NEUTRAL_SET : GOLDEN_SET;
+  const setVersion = neutral ? NEUTRAL_VERSION : GOLDEN_SET_VERSION;
+  const datasetName = neutral ? `${DATASET_NAME}-neutral` : DATASET_NAME;
+
   const only = option("only")?.split(",");
-  const cases = only
-    ? GOLDEN_SET.filter((c) => only.includes(c.id))
-    : GOLDEN_SET;
+  const cases = only ? setCases.filter((c) => only.includes(c.id)) : setCases;
   if (only && cases.length !== only.length)
     blocked(
       `unknown case id in --only: ${only.filter((id) => !cases.some((c) => c.id === id)).join(", ")}`,
@@ -144,12 +160,13 @@ async function main() {
     .replace("T", "-");
   const sha = commit();
   const meta = {
-    runId: `${stamp}-${sha.slice(0, 7)}-${Math.random().toString(36).slice(2, 6)}`,
+    agentMode: mode,
+    runId: `${stamp}-${sha.slice(0, 7)}-${mode}-${Math.random().toString(36).slice(2, 6)}`,
     commit: sha,
-    goldenSetVersion: GOLDEN_SET_VERSION,
+    goldenSetVersion: setVersion,
   };
   console.log(
-    `Evaluating ${cases.length} case(s): run ${meta.runId}, ${GOLDEN_SET_VERSION}, ${RUBRIC_VERSION}, Ask Copper ${defaultModel()}, judge ${judgeModel()}, concurrency ${CONCURRENCY}` +
+    `Evaluating ${cases.length} case(s): run ${meta.runId}, ${mode}-agent, ${setVersion}, ${RUBRIC_VERSION}, Ask Copper ${defaultModel()}, judge ${judgeModel()}, concurrency ${CONCURRENCY}` +
       (lf ? ", Langfuse on" : ", Langfuse off"),
   );
 
@@ -158,7 +175,17 @@ async function main() {
     let result: CaseResult;
     try {
       result = await withTimeout(
-        evaluateCase(testCase, meta),
+        evaluateCase(
+          testCase,
+          meta,
+          // Comparing architectures: the judge must not be able to tell them
+          // apart, so it sees "Assistant" and no handoff plumbing.
+          neutral
+            ? {
+                judge: (c, r) => judgeCase(c, r, undefined, { blind: true }),
+              }
+            : {},
+        ),
         CASE_TIMEOUT_MS,
         testCase.id,
       );
@@ -211,21 +238,28 @@ async function main() {
     // case's Ask Copper turns are recorded inside the experiment item's trace.
     registerTracingGlobally();
     try {
-      await syncDataset(lf, RUBRIC_VERSION);
-      const dataset = await lf.client.dataset.get(DATASET_NAME);
+      await syncDataset(lf, RUBRIC_VERSION, setCases, datasetName, setVersion);
+      const dataset = await lf.client.dataset.get(datasetName);
+      // Items are matched by the case id kept in their metadata: their own ids
+      // carry the dataset name (see datasetItemId in evals/langfuse.ts).
       const wanted = new Set(cases.map((c) => c.id));
-      const items = dataset.items.filter((item) => wanted.has(item.id));
+      const items = dataset.items.filter((item) =>
+        wanted.has(
+          (item.metadata as { caseId?: string } | undefined)?.caseId ?? item.id,
+        ),
+      );
       if (items.length !== cases.length)
         lf.problems.push(
           `the dataset has ${items.length} of the ${cases.length} cases`,
         );
       const experiment = await lf.client.experiment.run({
-        name: "Ask Copper golden set",
+        name: `Ask Copper ${mode}-agent (${setVersion})`,
         runName: meta.runId,
-        description: `Golden set ${GOLDEN_SET_VERSION}, rubric ${RUBRIC_VERSION}, on commit ${meta.commit.slice(0, 7)}`,
+        description: `${mode}-agent, golden set ${setVersion}, rubric ${RUBRIC_VERSION}, on commit ${meta.commit.slice(0, 7)}`,
         metadata: {
+          agentMode: mode,
           commit: meta.commit,
-          goldenSetVersion: GOLDEN_SET_VERSION,
+          goldenSetVersion: setVersion,
           rubricVersion: RUBRIC_VERSION,
           candidateModel: defaultModel(),
           judgeModel: judgeModel(),
@@ -264,6 +298,12 @@ async function main() {
       langfuse.experimentUrl = experiment.experimentUrl;
       langfuse.datasetRunId = experiment.datasetRunId;
     } catch (error) {
+      // Say it now, and keep it: without the experiment, the cases below run
+      // without Langfuse experiment items or scores.
+      console.warn(
+        "[langfuse] the experiment could not be recorded; cases run without it:",
+        errorMessage(error),
+      );
       lf.problems.push(`experiment: ${errorMessage(error)}`);
     }
   }
@@ -300,18 +340,25 @@ async function main() {
           0,
         );
       const want = { scores: expected, items: traceIds.length };
-      const found = await readBack(meta.runId, traceIds, want);
+      const found = await readBack(meta.runId, traceIds, want, {
+        since: now.toISOString(),
+      });
       langfuse.complete =
         sent &&
         lf.problems.length === 0 &&
+        !found.error &&
         found.scores >= want.scores &&
         found.items >= want.items;
-      if (found.items < want.items)
-        langfuse.detail = `${found.items} of ${want.items} experiment items were found in Langfuse after waiting`;
-      else if (found.scores < want.scores)
-        langfuse.detail = `${found.scores} of ${want.scores} scores were found in Langfuse after waiting`;
-      else if (langfuse.complete)
-        langfuse.detail = `${found.items} experiment items and ${found.scores} scores read back`;
+      // What was recorded while running (lf.problems) stays in the detail: the
+      // read-back adds to it, never replaces it.
+      const readback = found.error
+        ? `the read-back query FAILED (${found.errorKind ?? "other"}), so this says nothing about whether the data is there: ${found.error}`
+        : found.items < want.items
+          ? `${found.items} of ${want.items} experiment items were MISSING from Langfuse after waiting`
+          : found.scores < want.scores
+            ? `${found.scores} of ${want.scores} scores were MISSING from Langfuse after waiting`
+            : `${found.items} experiment items and ${found.scores} scores read back`;
+      langfuse.detail = [...lf.problems, readback].join(" | ");
     } else {
       langfuse.complete = sent && lf.problems.length === 0;
       if (langfuse.complete) langfuse.detail = "traces and scores sent";
@@ -328,7 +375,8 @@ async function main() {
   const info: RunInfo = {
     runId: meta.runId,
     commit: meta.commit,
-    goldenSetVersion: GOLDEN_SET_VERSION,
+    agentMode: mode,
+    goldenSetVersion: setVersion,
     rubricVersion: RUBRIC_VERSION,
     candidateModel: defaultModel(),
     judgeModel: judgeModel(),
@@ -347,6 +395,10 @@ async function main() {
   if (langfuse.experimentUrl)
     console.log(`Langfuse experiment: ${langfuse.experimentUrl}`);
   console.log(`Results: ${OUT}/results.json, results.csv, summary.md`);
+  // In GitHub Actions, put the scores where the pull request's checks show them.
+  if (process.env.GITHUB_ACTIONS === "true")
+    for (const line of annotationsFor(info, summary, results))
+      console.log(line);
   process.exit(summary.exitCode);
 }
 

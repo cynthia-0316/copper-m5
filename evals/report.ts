@@ -5,6 +5,8 @@ import type { CaseResult, Summary } from "@/evals/evaluate";
 export type RunInfo = {
   runId: string;
   commit: string;
+  /** Which architecture answered. */
+  agentMode?: "single" | "multi";
   goldenSetVersion: string;
   rubricVersion: string;
   candidateModel: string;
@@ -51,6 +53,7 @@ export function markdownSummary(
     "",
     `- Cases: **${summary.total}** | passed **${summary.passed}** | failed **${summary.failed}** | errors **${summary.errors}**`,
     `- Pass rate **${(summary.passRate * 100).toFixed(0)}%**; average judge score **${summary.averageOverall?.toFixed(2) ?? "n/a"}** / 5`,
+    `- Architecture: **${info.agentMode ?? "multi"}-agent**`,
     `- Run \`${info.runId}\` on commit \`${info.commit.slice(0, 7)}\`; golden set \`${info.goldenSetVersion}\`, rubric \`${info.rubricVersion}\``,
     `- Ask Copper model \`${info.candidateModel}\`; judge model \`${info.judgeModel}\` (temperature 0)`,
   ];
@@ -229,4 +232,54 @@ export function writeReport(
   const md = markdownSummary(info, summary, results);
   writeFileSync(join(dir, "summary.md"), md);
   return md;
+}
+
+// GitHub Actions "annotations": lines a job prints that GitHub shows on the run
+// page and on the pull request's Checks tab, to anyone, even someone who isn't
+// signed in (the job's logs need a sign-in). The AI judge's scores go there so a
+// reviewer sees them in the pull request's checks.
+const data = (text: string) =>
+  text.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+const property = (text: string) =>
+  data(text).replace(/:/g, "%3A").replace(/,/g, "%2C");
+
+export function annotationsFor(
+  info: RunInfo,
+  summary: Summary,
+  results: CaseResult[],
+): string[] {
+  const level =
+    summary.verdict === "pass"
+      ? "notice"
+      : summary.verdict === "fail"
+        ? "error"
+        : "warning";
+  const overall = [
+    `${summary.passed}/${summary.total} cases passed`,
+    `pass rate ${(summary.passRate * 100).toFixed(0)}%`,
+    `average judge score ${summary.averageOverall?.toFixed(2) ?? "n/a"} / 5`,
+    `critical failures ${summary.criticalFailures.length}`,
+    `${info.agentMode ?? "multi"}-agent, ${info.goldenSetVersion}, ${info.rubricVersion}`,
+    ...summary.reasons,
+  ].join(" | ");
+  const cases = results
+    .map((r) => {
+      const v = r.judge?.verdict;
+      const mark =
+        r.status === "passed"
+          ? "PASS"
+          : r.status === "failed"
+            ? "FAIL"
+            : "ERROR";
+      return `${mark} ${r.caseId}: ${
+        v
+          ? `overall ${v.overall}/5 (correctness ${v.correctness}, grounded ${v.groundedness}, rules ${v.ruleCompliance}, tools ${v.toolFidelity})`
+          : "not graded"
+      }`;
+    })
+    .join("\n");
+  return [
+    `::${level} title=${property(`AI judge evaluation: ${summary.verdict.toUpperCase()}`)}::${data(overall)}`,
+    `::notice title=${property("AI judge scores, case by case")}::${data(cases)}`,
+  ];
 }
